@@ -1,0 +1,17 @@
+body { font-family: Arial, sans-serif; margin: 0; background: #f7f7f8; color: #1d1d1f; }
+header { background: #223; color: #fff; padding: 1rem 1.5rem; }
+nav { background: #fff; border-bottom: 1px solid #ddd; padding: 0.7rem 1.5rem; display: flex; gap: 1rem; align-items: center; }
+main { padding: 1.2rem 1.5rem 2rem; }
+a { color: #1557b0; text-decoration: none; }
+.card { background: #fff; border: 1px solid #ddd; border-radius: 6px; padding: 0.8rem; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(180px,1fr)); gap: 0.8rem; margin-bottom: 1rem; }
+form.stack { display: grid; gap: 0.7rem; max-width: 680px; }
+label { display: grid; gap: 0.3rem; font-size: 0.95rem; }
+input, select, button { padding: 0.5rem; font-size: 0.95rem; }
+button { cursor: pointer; }
+.inline-form { display: inline-flex; gap: 0.4rem; align-items: center; }
+table { width: 100%; border-collapse: collapse; background: #fff; }
+th, td { border: 1px solid #ddd; padding: 0.5rem; text-align: left; font-size: 0.9rem; }
+.success { background: #e7f8e7; border: 1px solid #83cf83; padding: 0.6rem; }
+.error { background: #fdeaea; border: 1px solid #e79f9f; padding: 0.6rem; }
+.secret-box { background: #fff8dd; border: 1px solid #e6cc6e; padding: 0.7rem; margin: 0.8rem 0; }
