@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Mapping and exposure</h2>
+<h3>Mapped public fields</h3>
+<table>
+  <thead><tr><th>Public field</th><th>Mode</th><th>Source</th><th>Criticality</th></tr></thead>
+  <tbody>
+    {% for field, rule in mapping.items() %}
+    <tr><td>{{ field }}</td><td>{{ rule.mode }}</td><td>{{ rule.source or '-' }}</td><td>{{ rule.criticality }}</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+<h3>Allowed filters</h3>
+<p>{{ allowed_filters|join(', ') }}</p>
+<h3>Allowed facets</h3>
+<p>{{ allowed_facets|join(', ') }}</p>
+<h3>Allowed sorts</h3>
+<p>{{ allowed_sorts|join(', ') }}</p>
+<h3>Allowed include fields</h3>
+<p>{{ allowed_include_fields|join(', ') }}</p>
+{% endblock %}

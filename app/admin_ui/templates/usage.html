@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Recent activity</h2>
+<table>
+  <thead><tr><th>Timestamp</th><th>Endpoint</th><th>Method</th><th>Status</th><th>Subject</th><th>Error</th><th>Latency (ms)</th></tr></thead>
+  <tbody>
+    {% for e in events %}
+    <tr>
+      <td>{{ e.timestamp }}</td>
+      <td>{{ e.endpoint }}</td>
+      <td>{{ e.method }}</td>
+      <td>{{ e.status_code }}</td>
+      <td>{{ e.api_key_id or e.subject }}</td>
+      <td>{{ e.error_code or '-' }}</td>
+      <td>{{ e.latency_ms }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

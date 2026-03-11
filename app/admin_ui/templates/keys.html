@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>API keys</h2>
+{% if message %}<p class="success">{{ message }}</p>{% endif %}
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
+
+<form method="post" action="/admin/ui/keys/create" class="inline-form">
+  <label>Key label <input name="key_id" required /></label>
+  <button type="submit">Create API key</button>
+</form>
+
+{% if new_key %}
+<div class="secret-box">
+  <p><strong>New key created:</strong> {{ new_key.key_id }}</p>
+  <p><strong>Secret (copy now):</strong> <code>{{ new_key.key }}</code></p>
+</div>
+{% endif %}
+
+<table>
+  <thead><tr><th>Key label</th><th>Status</th><th>Created</th><th>Last used</th><th>Actions</th></tr></thead>
+  <tbody>
+    {% for key in keys %}
+    <tr>
+      <td>{{ key.key_id }}</td>
+      <td>{{ key.status }}</td>
+      <td>{{ key.created_at }}</td>
+      <td>{{ key.last_used_at or '-' }}</td>
+      <td>
+        <form class="inline-form" method="post" action="/admin/ui/keys/{{ key.key_id }}/status">
+          <button name="action" value="activate" type="submit">Activate</button>
+          <button name="action" value="suspend" type="submit">Suspend</button>
+          <button name="action" value="revoke" type="submit">Revoke</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

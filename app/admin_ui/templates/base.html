@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PISCO-API Admin</title>
+  <link rel="stylesheet" href="/admin-static/admin.css" />
+</head>
+<body>
+  <header>
+    <h1>PISCO-API Admin</h1>
+    {% if current_key_id %}
+    <p>Signed in as <strong>{{ current_key_id }}</strong></p>
+    {% endif %}
+  </header>
+
+  {% if current_key_id %}
+  <nav>
+    <a href="/admin/ui">Dashboard</a>
+    <a href="/admin/ui/config">Configuration</a>
+    <a href="/admin/ui/mapping">Mapping</a>
+    <a href="/admin/ui/keys">API keys</a>
+    <a href="/admin/ui/usage">Recent activity</a>
+    <form action="/admin/logout" method="post" class="inline-form"><button type="submit">Sign out</button></form>
+  </nav>
+  {% endif %}
+
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

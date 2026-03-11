@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Dashboard</h2>
+<div class="grid">
+  <div class="card"><h3>Service</h3><p>{{ status.service }}</p></div>
+  <div class="card"><h3>Backend connection</h3><p>{{ status.backend }}</p></div>
+  <div class="card"><h3>Active API keys</h3><p>{{ status.usage.active_keys }}</p></div>
+  <div class="card"><h3>Recent requests</h3><p>{{ status.usage.events }}</p></div>
+  <div class="card"><h3>Recent errors</h3><p>{{ status.usage.errors }}</p></div>
+  <div class="card"><h3>Source index</h3><p>{{ status.source }}</p></div>
+</div>
+<ul>
+  <li><strong>Config file:</strong> {{ status.config_path }}</li>
+  <li><strong>State database:</strong> {{ status.db_path }}</li>
+</ul>
+{% endblock %}
