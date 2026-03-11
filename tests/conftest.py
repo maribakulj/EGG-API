@@ -1,25 +1,13 @@
 from __future__ import annotations
 
-import os
-import sys
-import tempfile
-from pathlib import Path
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-
-_tmp_dir = tempfile.TemporaryDirectory()
-os.environ.setdefault("PISCO_STATE_DB_PATH", str(Path(_tmp_dir.name) / "test_state.sqlite3"))
-os.environ.setdefault("PISCO_BOOTSTRAP_ADMIN_KEY", "test-admin-key")
-
-from app.dependencies import container  # noqa: E402
-from app.main import app  # noqa: E402
-from app.schemas.query import NormalizedQuery  # noqa: E402
+from app.dependencies import container
+from app.main import app
+from app.schemas.query import NormalizedQuery
 
 
 class FakeAdapter:
@@ -59,12 +47,6 @@ class FakeAdapter:
 @pytest.fixture(autouse=True)
 def reset_container() -> None:
     container.adapter = FakeAdapter()
-    with container.store._connect() as conn:  # noqa: SLF001
-        conn.execute("DELETE FROM usage_events")
-        conn.execute("DELETE FROM quota_counters")
-        conn.execute("DELETE FROM quota_config")
-    container.rate_limiter.max_requests = 60
-    container.rate_limiter.window_seconds = 60
     yield
 
 

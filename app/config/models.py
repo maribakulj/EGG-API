@@ -22,11 +22,6 @@ class BackendConfig(BaseModel):
 
 class AuthConfig(BaseModel):
     public_mode: str = "anonymous_allowed"  # anonymous_allowed | api_key_optional | api_key_required
-    bootstrap_admin_key: str = "dev-admin-key-change-me"
-
-
-class StorageConfig(BaseModel):
-    sqlite_path: str = "data/pisco_state.sqlite3"
 
 
 class FieldMapping(BaseModel):
@@ -41,7 +36,6 @@ class FieldMapping(BaseModel):
 
 class AppConfig(BaseModel):
     backend: BackendConfig = Field(default_factory=BackendConfig)
-    storage: StorageConfig = Field(default_factory=StorageConfig)
     security_profile: str = "prudent"
     profiles: dict[str, SecurityProfile] = Field(
         default_factory=lambda: {
