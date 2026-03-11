@@ -48,38 +48,6 @@ Not included in v1:
 - Python 3.10+
 - Elasticsearch backend (v8+ recommended for this MVP)
 
-## Locked-down/offline install strategy
-
-If your environment cannot access public package indexes (e.g. proxy blocks `pypi.org`), use one of these approaches:
-
-1. **Internal mirror (recommended)**
-   - Point pip to an internal mirror (Artifactory/devpi/Nexus) that mirrors PyPI packages.
-   - Example:
-     ```bash
-     PIP_INDEX_URL=https://<internal-mirror>/simple \
-     python -m pip install --no-build-isolation -e '.[dev]'
-     ```
-
-2. **Prebuilt wheelhouse (fully offline)**
-   - In a connected environment, build/download wheels:
-     ```bash
-     mkdir -p wheelhouse
-     python -m pip wheel -r <(python - <<'REQ'
-fastapi>=0.115.0
-uvicorn>=0.30.0
-pydantic>=2.8.0
-httpx>=0.27.0
-PyYAML>=6.0.1
-pytest>=8.2.0
-pytest-asyncio>=0.23.0
-REQ
-) -w wheelhouse
-     ```
-   - Transfer `wheelhouse/` into the locked-down environment and install with:
-     ```bash
-     python -m pip install --no-index --find-links=wheelhouse --no-build-isolation -e '.[dev]'
-     ```
-
 ## Quickstart
 
 ```bash
