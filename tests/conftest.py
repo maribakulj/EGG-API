@@ -5,9 +5,14 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from app.auth.api_keys import ApiKeyManager
 from app.dependencies import container
-from app.main import app
+from app.rate_limit.limiter import InMemoryRateLimiter
+from app.config.models import AppConfig
+from app.mappers.schema_mapper import SchemaMapper
+from app.query_policy.engine import QueryPolicyEngine
 from app.schemas.query import NormalizedQuery
+from app.storage.sqlite_store import SQLiteStore
 
 
 class FakeAdapter:
@@ -45,13 +50,22 @@ class FakeAdapter:
 
 
 @pytest.fixture(autouse=True)
-def reset_container() -> None:
+def reset_container(tmp_path) -> None:
     container.adapter = FakeAdapter()
+    container.rate_limiter = InMemoryRateLimiter()
+    container.config_manager._config = AppConfig()
+    container.store = SQLiteStore(tmp_path / "state.sqlite3")
+    container.store.initialize()
+    container.api_keys = ApiKeyManager(container.store, container.config_manager.config.auth.bootstrap_admin_key)
+    container.mapper = SchemaMapper(container.config_manager.config)
+    container.policy = QueryPolicyEngine(container.config_manager.config)
     yield
 
 
 @pytest.fixture()
 def client() -> TestClient:
+    from app.main import app
+
     return TestClient(app)
 
 

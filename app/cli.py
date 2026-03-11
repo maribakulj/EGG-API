@@ -10,7 +10,7 @@ import uvicorn
 
 from app.config.manager import ConfigManager
 from app.config.models import AppConfig
-from app.runtime_paths import get_bootstrap_admin_key, get_config_path, get_state_db_path
+from app.runtime_paths import get_bootstrap_admin_key, get_config_path, get_home_dir, get_state_db_path
 from app.storage.sqlite_store import SQLiteStore
 
 
@@ -30,8 +30,12 @@ def cmd_init(args: argparse.Namespace) -> int:
     db_path = get_state_db_path(cfg.storage.sqlite_path)
     store = SQLiteStore(db_path)
     store.initialize()
-    store.ensure_admin_key(get_bootstrap_admin_key(cfg.auth.bootstrap_admin_key))
+
+    bootstrap_key = get_bootstrap_admin_key(cfg.auth.bootstrap_admin_key)
+    store.ensure_admin_key(bootstrap_key)
+
     print(f"Initialized state DB: {db_path}")
+    print("Bootstrap complete. Next: pisco-api run --reload")
     return 0
 
 
@@ -43,10 +47,13 @@ def cmd_print_paths(_: argparse.Namespace) -> int:
         cfg = ConfigManager(cfg_path, require_existing=True).config
 
     output = {
+        "home_dir": str(get_home_dir()),
         "config_path": str(cfg_path),
         "config_exists": cfg_exists,
         "state_db_path": str(get_state_db_path(cfg.storage.sqlite_path)),
-        "bootstrap_admin_key_source": "env:PISCO_BOOTSTRAP_ADMIN_KEY" if "PISCO_BOOTSTRAP_ADMIN_KEY" in os.environ else "config.auth.bootstrap_admin_key",
+        "bootstrap_admin_key_source": "env:PISCO_BOOTSTRAP_ADMIN_KEY"
+        if "PISCO_BOOTSTRAP_ADMIN_KEY" in os.environ
+        else "config.auth.bootstrap_admin_key",
     }
     print(json.dumps(output, indent=2))
     return 0
@@ -59,7 +66,11 @@ def cmd_check_config(_: argparse.Namespace) -> int:
         print(f"Configuration is valid: {manager.path}")
         return 0
     except Exception as exc:  # noqa: BLE001
-        print(f"Configuration check failed: {exc}", file=sys.stderr)
+        print(
+            "Configuration check failed: "
+            f"{exc}. Hint: run `pisco-api init` to generate a baseline config.",
+            file=sys.stderr,
+        )
         return 2
 
 
@@ -71,7 +82,11 @@ def cmd_check_backend(_: argparse.Namespace) -> int:
         print(json.dumps({"status": "ok", "backend": health}, indent=2))
         return 0
     except Exception as exc:  # noqa: BLE001
-        print(f"Backend check failed: {exc}", file=sys.stderr)
+        print(
+            "Backend check failed: "
+            f"{exc}. Verify backend.url/index in config and network reachability.",
+            file=sys.stderr,
+        )
         return 3
 
 

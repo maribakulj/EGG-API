@@ -14,6 +14,19 @@ class ApiKeyRecord:
     status: str
     created_at: str
     prefix: str
+    last_used_at: str | None = None
+
+
+@dataclass
+class UsageEvent:
+    timestamp: str
+    endpoint: str
+    method: str
+    status_code: int
+    api_key_id: str | None
+    subject: str
+    latency_ms: int
+    error_code: str | None
 
 
 class SQLiteStore:
@@ -67,6 +80,12 @@ class SQLiteStore:
                     latency_ms INTEGER NOT NULL,
                     error_code TEXT
                 );
+
+                CREATE TABLE IF NOT EXISTS ui_sessions (
+                    token TEXT PRIMARY KEY,
+                    key_id TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
                 """
             )
 
@@ -101,7 +120,7 @@ class SQLiteStore:
     def list_api_keys(self) -> list[ApiKeyRecord]:
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT key_id, status, created_at, prefix FROM api_keys ORDER BY key_id"
+                "SELECT key_id, status, created_at, prefix, last_used_at FROM api_keys ORDER BY key_id"
             ).fetchall()
         return [ApiKeyRecord(**dict(row)) for row in rows]
 
@@ -123,7 +142,7 @@ class SQLiteStore:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT key_id, status, created_at, prefix FROM api_keys
+                SELECT key_id, status, created_at, prefix, last_used_at FROM api_keys
                 WHERE key_hash = ?
                 """,
                 (self._hash_key(secret),),
@@ -138,6 +157,28 @@ class SQLiteStore:
                 (datetime.now(timezone.utc).isoformat(), record.key_id),
             )
             return record
+
+    def create_ui_session(self, key_id: str) -> str:
+        token = secrets.token_urlsafe(32)
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO ui_sessions(token, key_id, created_at) VALUES (?, ?, ?)",
+                (token, key_id, datetime.now(timezone.utc).isoformat()),
+            )
+        return token
+
+    def get_ui_session_key_id(self, token: str | None) -> str | None:
+        if not token:
+            return None
+        with self._connect() as conn:
+            row = conn.execute("SELECT key_id FROM ui_sessions WHERE token = ?", (token,)).fetchone()
+        return str(row["key_id"]) if row else None
+
+    def delete_ui_session(self, token: str | None) -> None:
+        if not token:
+            return
+        with self._connect() as conn:
+            conn.execute("DELETE FROM ui_sessions WHERE token = ?", (token,))
 
     def get_quota(self, scope: str, default_max: int, default_window: int) -> tuple[int, int]:
         with self._connect() as conn:
@@ -218,6 +259,19 @@ class SQLiteStore:
                     error_code,
                 ),
             )
+
+    def list_recent_usage_events(self, limit: int = 100) -> list[UsageEvent]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT timestamp, endpoint, method, status_code, api_key_id, subject, latency_ms, error_code
+                FROM usage_events
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [UsageEvent(**dict(row)) for row in rows]
 
     def usage_summary(self) -> dict[str, int]:
         with self._connect() as conn:
