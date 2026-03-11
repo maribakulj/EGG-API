@@ -1,8 +1,11 @@
 [project]
 name = "pisco-api"
 version = "0.1.0"
-description = "PISCO-API MVP"
+description = "PISCO-API: safe, normalized API facade for GLAM search backends"
+readme = "README.md"
 requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "PISCO-API Contributors" }]
 dependencies = [
   "fastapi>=0.115.0",
   "uvicorn>=0.30.0",
@@ -17,9 +20,18 @@ dev = [
   "pytest-asyncio>=0.23.0"
 ]
 
+[project.scripts]
+pisco-api = "app.cli:main"
+
 [tool.pytest.ini_options]
 addopts = "-q"
 testpaths = ["tests"]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.setuptools.package-data]
+app = ["admin_ui/static/*.css", "admin_ui/templates/*.html"]
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]

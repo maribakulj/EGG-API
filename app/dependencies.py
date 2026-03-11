@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from app.adapters.elasticsearch.adapter import ElasticsearchAdapter
 from app.auth.api_keys import ApiKeyManager
 from app.config.manager import ConfigManager
@@ -9,13 +7,20 @@ from app.config.models import AppConfig
 from app.mappers.schema_mapper import MappingHealthService, SchemaMapper
 from app.query_policy.engine import QueryPolicyEngine
 from app.rate_limit.limiter import InMemoryRateLimiter
+from app.runtime_paths import get_bootstrap_admin_key, get_state_db_path
+from app.storage.sqlite_store import SQLiteStore
 
 
 class Container:
     def __init__(self) -> None:
-        self.config_manager = ConfigManager(Path("examples/config.yaml"))
+        self.config_manager = ConfigManager(require_existing=False)
         config = self.config_manager.config
-        self.api_keys = ApiKeyManager()
+
+        self.store = SQLiteStore(get_state_db_path(config.storage.sqlite_path))
+        self.store.initialize()
+
+        bootstrap_key = get_bootstrap_admin_key(config.auth.bootstrap_admin_key)
+        self.api_keys = ApiKeyManager(self.store, bootstrap_key)
         self.rate_limiter = InMemoryRateLimiter()
         self.mapper = SchemaMapper(config)
         self.mapping_health = MappingHealthService()
@@ -24,6 +29,10 @@ class Container:
 
     def reload(self, config: AppConfig) -> None:
         self.config_manager.save(config)
+        self.store = SQLiteStore(get_state_db_path(config.storage.sqlite_path))
+        self.store.initialize()
+        bootstrap_key = get_bootstrap_admin_key(config.auth.bootstrap_admin_key)
+        self.api_keys = ApiKeyManager(self.store, bootstrap_key)
         self.mapper = SchemaMapper(config)
         self.policy = QueryPolicyEngine(config)
         self.adapter = ElasticsearchAdapter(config.backend.url, config.backend.index)
