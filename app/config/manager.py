@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import yaml
@@ -10,9 +9,8 @@ from app.config.models import AppConfig
 
 
 class ConfigManager:
-    def __init__(self, path: Path | None = None) -> None:
-        env_path = os.getenv("PISCO_CONFIG_PATH")
-        self.path = path or Path(env_path or "examples/config.yaml")
+    def __init__(self, path: Path) -> None:
+        self.path = path
         self._config = AppConfig()
         if self.path.exists():
             self.load()

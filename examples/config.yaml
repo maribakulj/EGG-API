@@ -2,12 +2,9 @@ backend:
   type: elasticsearch
   url: http://localhost:9200
   index: records
-storage:
-  sqlite_path: data/pisco_state.sqlite3
 security_profile: prudent
 auth:
   public_mode: anonymous_allowed
-  bootstrap_admin_key: dev-admin-key-change-me
 allowed_sorts:
   - relevance
   - date_desc

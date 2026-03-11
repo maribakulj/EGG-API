@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import secrets
 from dataclasses import dataclass
-
-from app.storage.sqlite_store import ApiKeyRecord, SQLiteStore
+from datetime import datetime, timezone
 
 
 @dataclass
@@ -14,29 +14,29 @@ class ApiKey:
 
 
 class ApiKeyManager:
-    def __init__(self, store: SQLiteStore, bootstrap_admin_key: str) -> None:
-        self.store = store
-        self.store.ensure_admin_key(bootstrap_admin_key, key_id="admin")
-        self.default_admin_key = bootstrap_admin_key
+    def __init__(self) -> None:
+        self._keys: dict[str, ApiKey] = {}
+        default = self.create("admin")
+        self.default_admin_key = default.key
 
     def create(self, key_id: str) -> ApiKey:
-        key, meta = self.store.create_api_key(key_id)
-        return ApiKey(key_id=meta.key_id, key=key, created_at=meta.created_at, revoked=False)
+        key = secrets.token_urlsafe(24)
+        entry = ApiKey(key_id=key_id, key=key, created_at=datetime.now(timezone.utc).isoformat())
+        self._keys[key] = entry
+        return entry
 
-    def list_keys(self) -> list[ApiKeyRecord]:
-        return self.store.list_api_keys()
+    def list_keys(self) -> list[ApiKey]:
+        return list(self._keys.values())
 
     def revoke(self, key: str) -> bool:
-        return self.store.set_key_status(key, "revoked")
-
-    def suspend(self, key: str) -> bool:
-        return self.store.set_key_status(key, "suspended")
-
-    def activate(self, key: str) -> bool:
-        return self.store.set_key_status(key, "active")
+        entry = self._keys.get(key)
+        if not entry:
+            return False
+        entry.revoked = True
+        return True
 
     def validate(self, key: str | None) -> bool:
-        return self.store.validate_api_key(key) is not None
-
-    def get_identity(self, key: str | None) -> ApiKeyRecord | None:
-        return self.store.validate_api_key(key)
+        if not key:
+            return False
+        entry = self._keys.get(key)
+        return bool(entry and not entry.revoked)
