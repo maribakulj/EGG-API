@@ -6,22 +6,14 @@ import yaml
 from pydantic import ValidationError
 
 from app.config.models import AppConfig
-from app.runtime_paths import get_config_path
 
 
 class ConfigManager:
-    def __init__(self, path: Path | None = None, *, require_existing: bool = True) -> None:
-        self.path = path or get_config_path()
+    def __init__(self, path: Path) -> None:
+        self.path = path
         self._config = AppConfig()
-
-        if not self.path.exists():
-            if require_existing:
-                raise RuntimeError(
-                    f"Configuration file not found at {self.path}. Run `pisco-api init` to create defaults."
-                )
-            return
-
-        self.load()
+        if self.path.exists():
+            self.load()
 
     @property
     def config(self) -> AppConfig:
@@ -43,8 +35,3 @@ class ConfigManager:
             return True, None
         except ValidationError as exc:
             return False, str(exc)
-
-    def ensure_default_file(self) -> Path:
-        if not self.path.exists():
-            self.save(AppConfig())
-        return self.path

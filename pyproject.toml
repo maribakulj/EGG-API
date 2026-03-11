@@ -11,9 +11,6 @@ dependencies = [
   "PyYAML>=6.0.1"
 ]
 
-[project.scripts]
-pisco-api = "app.cli:main"
-
 [project.optional-dependencies]
 dev = [
   "pytest>=8.2.0",

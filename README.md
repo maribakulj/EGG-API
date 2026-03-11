@@ -1,94 +1,96 @@
-# PISCO-API
+# PISCO-API (MVP)
 
-PISCO-API is a plug-and-play API layer for GLAM collections. It exposes a safe, normalized public API in front of an existing backend search index (Elasticsearch in v1).
+PISCO-API is a plug-and-play API layer for GLAM collections. It sits in front of an existing search backend and exposes a safe, normalized, backend-independent public API contract.
 
-## What this version supports
+## Purpose
 
-- FastAPI service with public API and admin API
-- Protected admin web UI
-- Elasticsearch adapter (read-only)
-- YAML configuration
-- SQLite operational state (API keys, quotas, usage events, admin UI sessions)
-- Query policy enforcement and schema mapping
+This MVP delivers a production-oriented baseline for institutions that already have searchable data (currently Elasticsearch only) but need a stable public API and setup/admin controls.
 
-## Requirements
+## Architecture Overview
+
+- **FastAPI app** (`app/main.py`)
+- **Public API** (`app/public_api/routes.py`)
+- **Admin API** (`app/admin_api/routes.py`)
+- **Query policy layer** (`app/query_policy/engine.py`) for validation and safety enforcement
+- **Backend adapter** (`app/adapters/elasticsearch/adapter.py`) for read-only Elasticsearch access
+- **Schema mapping** (`app/mappers/schema_mapper.py`) to normalize backend documents to public records
+- **Config manager** (`app/config/manager.py`) for YAML config persistence and validation
+- **Security**:
+  - API keys (`app/auth/api_keys.py`)
+  - admin key requirement
+  - configurable public auth mode
+  - in-memory rate limiting (`app/rate_limit/limiter.py`)
+
+## Current Scope (v1 MVP)
+
+Included:
+- Elasticsearch adapter
+- Read-only public endpoints
+- Admin setup/config endpoints
+- YAML config management
+- In-memory API key store
+- In-memory rate limiting
+- Tests (unit + integration + security + contract)
+
+Not included in v1:
+- OpenSearch adapter
+- Solr adapter
+- Web admin UI
+- persistent API key store
+- Redis-backed rate limiting/cache
+- cursor pagination
+- OAI-PMH module
+- IIIF proxy enhancements
+
+
+## Runtime requirements
 
 - Python 3.10+
-- Access to an Elasticsearch backend for full end-to-end runtime checks
+- Elasticsearch backend (v8+ recommended for this MVP)
 
-## Quick start (recommended)
-
-```bash
-./scripts/setup.sh
-pisco-api init
-pisco-api run --reload
-```
-
-Then open:
-- Public health: `http://127.0.0.1:8000/v1/health`
-- Admin UI login: `http://127.0.0.1:8000/admin/login`
-
-## Operator commands
-
-Installed command: `pisco-api`
-
-- `pisco-api init` — create default config (if missing), initialize SQLite state DB, bootstrap admin key
-- `pisco-api run [--host 127.0.0.1 --port 8000 --reload]` — start server
-- `pisco-api check-config` — validate active config file
-- `pisco-api check-backend` — verify backend connectivity from current config
-- `pisco-api print-paths` — print effective config/state paths and key source hints
-
-Equivalent Make targets:
+## Quickstart
 
 ```bash
-make setup
-make init
-make run
-make check-config
-make check-backend
-make paths
+make install
 make test
+make run
 ```
 
-## Path model (predictable local layout)
+Server starts at `http://127.0.0.1:8000`.
 
-Default paths:
-- Config YAML: `config/pisco.yaml`
-- SQLite state DB: `data/pisco_state.sqlite3`
+## Configuration
 
-Overrides:
-- `PISCO_CONFIG_PATH`
-- `PISCO_STATE_DB_PATH`
-- `PISCO_BOOTSTRAP_ADMIN_KEY`
+Default example: `examples/config.yaml`.
 
-Use `pisco-api print-paths` to confirm active paths.
+```yaml
+backend:
+  type: elasticsearch
+  url: http://localhost:9200
+  index: records
+security_profile: prudent
+auth:
+  public_mode: anonymous_allowed
+```
 
-## First run and startup behavior
+Profiles:
+- `prudent`: strict defaults and safer limits
+- `standard`: larger page/facet limits
 
-- If config is missing at startup, the app fails with a clear message:
-  - `Configuration file not found ... Run pisco-api init`
-- `pisco-api init` creates required paths and initializes the DB schema.
-- On app startup, SQLite schema is ensured automatically.
-- Invalid config fails fast during startup.
+## Public API
 
-## Admin UI (for non-technical operators)
+Base: `/v1`
 
-Entry points:
-- `/admin/login`
-- `/admin/ui`
+- `GET /v1/search`
+- `GET /v1/records/{id}`
+- `GET /v1/facets`
+- `GET /v1/health`
+- `GET /v1/openapi.json`
 
-Sign in uses existing admin API key validation. On success, a short-lived server-side UI session is created and stored in SQLite.
-
-Available pages:
-- Dashboard (service/paths/usage summary)
-- Configuration (safe editable subset)
-- Mapping and exposure inspection
-- API key management (create, suspend, revoke, activate)
-- Recent activity table (usage events)
+Public query parameters are normalized through the `QueryPolicyEngine`; raw backend DSL is never exposed.
 
 ## Admin API
 
-Base path: `/admin/v1` (API key required via `x-api-key`)
+Base: `/admin/v1` (requires `x-api-key`)
 
 - `POST /setup/detect`
 - `POST /setup/scan-fields`
@@ -99,62 +101,33 @@ Base path: `/admin/v1` (API key required via `x-api-key`)
 - `POST /test-query`
 - `GET /status`
 
-## Public API
+## Security Model
 
-Base path: `/v1`
+- Read-only backend adapter behavior
+- Admin endpoints require valid API key
+- Public auth mode is configurable:
+  - `anonymous_allowed`
+  - `api_key_optional`
+  - `api_key_required`
+- In-memory rate limiter applies quota checks
+- Unknown params, unsupported sorts/facets, and unsafe deep pagination are explicitly rejected
 
-- `GET /search`
-- `GET /records/{id}`
-- `GET /facets`
-- `GET /health`
-- `GET /openapi.json`
+## Limitations of v1
 
-## Locked-down/offline installation
+- Single backend adapter (Elasticsearch)
+- Single-instance, single-project assumptions
+- page/page_size pagination only
+- in-memory auth/rate-limit state (non-persistent)
+- no deep pagination workaround by design
 
-If internet access is blocked by proxy policy, use one of:
-
-1) Internal package mirror
-
-```bash
-PIP_INDEX_URL=https://<internal-mirror>/simple \
-python -m pip install --no-build-isolation -e '.[dev]'
-```
-
-2) Prebuilt wheelhouse
-
-Connected environment:
-
-```bash
-mkdir -p wheelhouse
-python -m pip wheel \
-  fastapi>=0.115.0 \
-  uvicorn>=0.30.0 \
-  pydantic>=2.8.0 \
-  httpx>=0.27.0 \
-  PyYAML>=6.0.1 \
-  pytest>=8.2.0 \
-  pytest-asyncio>=0.23.0 \
-  -w wheelhouse
-```
-
-Locked-down environment:
-
-```bash
-python -m pip install --no-index --find-links=wheelhouse --no-build-isolation -e '.[dev]'
-```
-
-## V1 limitations
-
-- Elasticsearch only (no OpenSearch/Solr yet)
-- Single-instance operational model
-- No cursor pagination yet
-- No web admin mapping studio (inspection-first)
-
-## Deferred roadmap
+## Roadmap
 
 - OpenSearch adapter
 - Solr adapter
-- Redis-backed rate limiting/cache
+- Web admin UI
+- Persistent API key store
+- Redis-backed rate limiting
+- Redis-backed caching
 - Cursor pagination
 - OAI-PMH module
 - IIIF proxy hardening

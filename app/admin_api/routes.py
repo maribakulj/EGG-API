@@ -29,11 +29,7 @@ def create_config(payload: dict[str, object] = Body(default_factory=dict)) -> di
 
 @router.get("/config")
 def get_config() -> dict[str, object]:
-    return {
-        "config_path": str(container.config_manager.path),
-        "state_db_path": str(container.store.db_path),
-        "config": container.config_manager.config.model_dump(mode="python"),
-    }
+    return container.config_manager.config.model_dump(mode="python")
 
 
 @router.put("/config")
@@ -60,23 +56,6 @@ def status() -> dict[str, object]:
     cfg = container.config_manager.config
     probe_doc = {"id": "probe", "type": "record"}
     mapping = container.mapping_health.classify(cfg.mapping, probe_doc)
-    required_missing = [
-        field
-        for field, state in mapping.items()
-        if state == "missing" and cfg.mapping.get(field) and cfg.mapping[field].criticality == "required"
-    ]
-    warnings = [
-        field
-        for field, state in mapping.items()
-        if state == "missing" and cfg.mapping.get(field) and cfg.mapping[field].criticality == "recommended"
-    ]
-    if required_missing:
-        raise AppError("configuration_error", "Mapping has missing required sources", {"mapping": mapping, "required_missing": required_missing}, 500)
-    return {
-        "status": "ok",
-        "sources": container.adapter.list_sources(),
-        "mapping": mapping,
-        "usage": container.store.usage_summary(),
-        "state_db_path": str(container.store.db_path),
-        "warnings": warnings,
-    }
+    if any(v == "missing" for v in mapping.values()):
+        raise AppError("configuration_error", "Mapping has missing required/recommended sources", {"mapping": mapping}, 500)
+    return {"status": "ok", "sources": container.adapter.list_sources(), "mapping": mapping}

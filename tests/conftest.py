@@ -1,83 +1,13 @@
 from __future__ import annotations
 
-import os
-import sys
-import tempfile
-from pathlib import Path
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-
-_tmp_dir = tempfile.TemporaryDirectory()
-state_path = Path(_tmp_dir.name) / "test_state.sqlite3"
-config_path = Path(_tmp_dir.name) / "test_config.yaml"
-config_path.write_text(
-    """
-backend:
-  type: elasticsearch
-  url: http://localhost:9200
-  index: records
-storage:
-  sqlite_path: data/pisco_state.sqlite3
-security_profile: prudent
-auth:
-  public_mode: anonymous_allowed
-  bootstrap_admin_key: dev-admin-key-change-me
-allowed_sorts:
-  - relevance
-  - date_desc
-  - date_asc
-  - title_asc
-allowed_facets:
-  - type
-  - language
-  - collection
-  - institution
-  - subject
-allowed_include_fields:
-  - id
-  - type
-  - title
-  - description
-  - creators
-mapping:
-  id:
-    source: id
-    mode: direct
-    criticality: required
-  type:
-    source: type
-    mode: first_non_empty
-    sources: [type, format]
-    criticality: required
-  title:
-    source: title
-    mode: direct
-    criticality: recommended
-  creators:
-    source: creator_csv
-    mode: split_list
-    separator: ";"
-    criticality: optional
-  links:
-    source: links
-    mode: nested_object
-    criticality: optional
-""".strip()
-)
-
-os.environ.setdefault("PISCO_CONFIG_PATH", str(config_path))
-os.environ.setdefault("PISCO_STATE_DB_PATH", str(state_path))
-os.environ.setdefault("PISCO_BOOTSTRAP_ADMIN_KEY", "test-admin-key")
-
-from app.dependencies import container  # noqa: E402
-from app.main import app  # noqa: E402
-from app.schemas.query import NormalizedQuery  # noqa: E402
+from app.dependencies import container
+from app.main import app
+from app.schemas.query import NormalizedQuery
 
 
 class FakeAdapter:
@@ -117,14 +47,6 @@ class FakeAdapter:
 @pytest.fixture(autouse=True)
 def reset_container() -> None:
     container.adapter = FakeAdapter()
-    with container.store._connect() as conn:  # noqa: SLF001
-        conn.execute("DELETE FROM usage_events")
-        conn.execute("DELETE FROM quota_counters")
-        conn.execute("DELETE FROM quota_config")
-        conn.execute("DELETE FROM ui_sessions")
-        conn.execute("DELETE FROM api_keys WHERE key_id != ?", ("admin",))
-    container.rate_limiter.max_requests = 60
-    container.rate_limiter.window_seconds = 60
     yield
 
 
