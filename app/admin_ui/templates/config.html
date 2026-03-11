@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Configuration</h2>
+<p>Edit core settings and save safely.</p>
+{% if message %}<p class="success">{{ message }}</p>{% endif %}
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
+<form method="post" action="/admin/ui/config" class="stack">
+  <label>Backend URL <input name="backend_url" value="{{ cfg.backend.url }}" required /></label>
+  <label>Source index <input name="backend_index" value="{{ cfg.backend.index }}" required /></label>
+
+  <label>Security profile
+    <select name="security_profile">
+      {% for name in cfg.profiles.keys() %}
+      <option value="{{ name }}" {% if name == cfg.security_profile %}selected{% endif %}>{{ name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+
+  <label>Public access
+    <select name="public_mode">
+      <option value="anonymous_allowed" {% if cfg.auth.public_mode == 'anonymous_allowed' %}selected{% endif %}>Anonymous allowed</option>
+      <option value="api_key_optional" {% if cfg.auth.public_mode == 'api_key_optional' %}selected{% endif %}>API key optional</option>
+      <option value="api_key_required" {% if cfg.auth.public_mode == 'api_key_required' %}selected{% endif %}>API key required</option>
+    </select>
+  </label>
+
+  <label>State DB path <input name="sqlite_path" value="{{ cfg.storage.sqlite_path }}" required /></label>
+  <label>Allow empty query
+    <select name="allow_empty_query">
+      <option value="false" {% if not profile.allow_empty_query %}selected{% endif %}>No</option>
+      <option value="true" {% if profile.allow_empty_query %}selected{% endif %}>Yes</option>
+    </select>
+  </label>
+  <label>Page size default <input name="page_size_default" type="number" min="1" value="{{ profile.page_size_default }}" required /></label>
+  <label>Page size max <input name="page_size_max" type="number" min="1" value="{{ profile.page_size_max }}" required /></label>
+  <label>Max depth <input name="max_depth" type="number" min="1" value="{{ profile.max_depth }}" required /></label>
+  <button type="submit">Save configuration</button>
+</form>
+{% endblock %}
