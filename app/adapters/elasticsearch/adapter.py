@@ -30,11 +30,13 @@ class ElasticsearchAdapter:
         timeout_seconds: float = 15.0,
         max_retries: int = 2,
         retry_backoff_seconds: float = 0.2,
+        max_buckets_per_facet: int = 20,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.index = index
         self.max_retries = max(0, int(max_retries))
         self.retry_backoff_seconds = max(0.0, float(retry_backoff_seconds))
+        self.max_buckets_per_facet = max(1, int(max_buckets_per_facet))
         # follow_redirects=False blocks SSRF via backend redirects to untrusted hosts.
         self.client = client or httpx.Client(
             timeout=float(timeout_seconds),
@@ -135,8 +137,13 @@ class ElasticsearchAdapter:
         *,
         include_aggs: bool = True,
         size_override: int | None = None,
-        max_buckets_per_facet: int = 20,
+        max_buckets_per_facet: int | None = None,
     ) -> dict[str, Any]:
+        bucket_size_default = (
+            self.max_buckets_per_facet
+            if max_buckets_per_facet is None
+            else max_buckets_per_facet
+        )
         must: list[dict[str, Any]] = []
         filter_clauses: list[dict[str, Any]] = []
         if query.q:
@@ -149,7 +156,7 @@ class ElasticsearchAdapter:
             filter_clauses.append({"term": {"has_iiif": query.has_iiif}})
 
         size = size_override if size_override is not None else query.page_size
-        bucket_size = max(1, int(max_buckets_per_facet))
+        bucket_size = max(1, int(bucket_size_default))
         body: dict[str, Any] = {
             "from": (query.page - 1) * query.page_size,
             "size": size,

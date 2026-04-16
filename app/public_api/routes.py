@@ -13,6 +13,7 @@ router = APIRouter(prefix="/v1", tags=["public"])
 
 @router.get("/health")
 def health() -> dict[str, object]:
+    """Liveness + backend health probe."""
     return {"status": "ok", "backend": container.adapter.health()}
 
 
@@ -22,14 +23,18 @@ def search(
     response: Response,
     _: None = Depends(enforce_public_auth),
 ):
+    """Run a full-text search.
+
+    Applies the security profile (page size, facet allowlist, depth limit) before
+    forwarding a single call to the backend; aggregations are extracted from the
+    same response when the caller requested facets.
+    """
     nq = container.policy.parse(request)
     etag = f'"search:{container.policy.compute_cache_key(nq)}"'
     cached = apply_cache_headers(request, response, etag)
     if cached is not None:
         return cached
 
-    # Single backend call: aggregations are extracted from the same payload
-    # when the client requested facets (no extra round-trip).
     payload = container.adapter.search(nq)
     hits = payload.get("hits", {}).get("hits", [])
     results = [container.mapper.map_record(h.get("_source", {})) for h in hits]
@@ -51,6 +56,7 @@ def get_record(
     response: Response,
     _: None = Depends(enforce_public_auth),
 ):
+    """Fetch a single record by identifier."""
     etag = f'"record:{record_id}"'
     cached = apply_cache_headers(request, response, etag)
     if cached is not None:
@@ -70,6 +76,7 @@ def facets(
     response: Response,
     _: None = Depends(enforce_public_auth),
 ):
+    """Return facet counts only (no hits), useful for sidebar UIs."""
     nq = container.policy.parse(request)
     etag = f'"facets:{container.policy.compute_cache_key(nq)}"'
     cached = apply_cache_headers(request, response, etag)

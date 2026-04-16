@@ -12,16 +12,19 @@ router = APIRouter(prefix="/admin/v1", tags=["admin"], dependencies=[Depends(req
 
 @router.post("/setup/detect")
 def detect() -> dict[str, object]:
+    """Probe the backend and return its detected version metadata."""
     return container.adapter.detect()
 
 
 @router.post("/setup/scan-fields")
 def scan_fields() -> dict[str, object]:
+    """Return the backend index mapping for field discovery."""
     return container.adapter.scan_fields()
 
 
 @router.post("/setup/create-config")
 def create_config(payload: dict[str, object] = Body(default_factory=dict)) -> dict[str, object]:
+    """Replace the current configuration with ``payload`` (validated)."""
     cfg = AppConfig.model_validate(payload or {})
     container.reload(cfg)
     return {"status": "created"}
@@ -29,11 +32,13 @@ def create_config(payload: dict[str, object] = Body(default_factory=dict)) -> di
 
 @router.get("/config")
 def get_config() -> dict[str, object]:
+    """Return the current configuration (secrets redacted)."""
     return container.config_manager.config.model_dump(mode="python")
 
 
 @router.put("/config")
 def put_config(payload: dict[str, object]) -> dict[str, object]:
+    """Persist a full configuration replacement."""
     cfg = AppConfig.model_validate(payload)
     container.reload(cfg)
     return {"status": "updated"}
@@ -41,18 +46,21 @@ def put_config(payload: dict[str, object]) -> dict[str, object]:
 
 @router.post("/config/validate")
 def validate_config(payload: dict[str, object]) -> dict[str, object]:
+    """Dry-run validation for a candidate configuration payload."""
     ok, error = container.config_manager.validate_data(payload)
     return {"valid": ok, "error": error}
 
 
 @router.post("/test-query")
 def test_query(request: Request) -> dict[str, object]:
+    """Translate the provided query into the backend DSL without executing it."""
     nq = container.policy.parse(request)
     return {"translated": container.adapter.translate_query(nq)}
 
 
 @router.get("/status")
 def status() -> dict[str, object]:
+    """Aggregate backend + mapping health for operator dashboards."""
     cfg = container.config_manager.config
     probe_doc = {"id": "probe", "type": "record"}
     mapping = container.mapping_health.classify(cfg.mapping, probe_doc)
