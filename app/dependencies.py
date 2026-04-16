@@ -7,19 +7,32 @@ from app.config.models import AppConfig
 from app.mappers.schema_mapper import MappingHealthService, SchemaMapper
 from app.query_policy.engine import QueryPolicyEngine
 from app.rate_limit.limiter import InMemoryRateLimiter
-from app.runtime_paths import get_bootstrap_admin_key, get_state_db_path
+from app.runtime_paths import get_state_db_path, resolve_bootstrap_admin_key
 from app.storage.sqlite_store import SQLiteStore
+
+import logging
+import sys
+import threading
+
+logger = logging.getLogger(__name__)
 
 
 class Container:
     def __init__(self) -> None:
+        self._reload_lock = threading.RLock()
         self.config_manager = ConfigManager(require_existing=False)
         config = self.config_manager.config
 
         self.store = SQLiteStore(get_state_db_path(config.storage.sqlite_path))
         self.store.initialize()
 
-        bootstrap_key = get_bootstrap_admin_key(config.auth.bootstrap_admin_key)
+        bootstrap_key, generated = resolve_bootstrap_admin_key(config.auth.bootstrap_admin_key)
+        if generated:
+            # Emit once to stderr so the operator can capture the one-time secret.
+            sys.stderr.write(
+                "[PISCO-API] Generated a bootstrap admin key (saved to the sidecar file). "
+                "Set PISCO_BOOTSTRAP_ADMIN_KEY to pin it across restarts.\n"
+            )
         self.api_keys = ApiKeyManager(self.store, bootstrap_key)
         self.rate_limiter = InMemoryRateLimiter()
         self.mapper = SchemaMapper(config)
@@ -28,14 +41,15 @@ class Container:
         self.adapter = ElasticsearchAdapter(config.backend.url, config.backend.index)
 
     def reload(self, config: AppConfig) -> None:
-        self.config_manager.save(config)
-        self.store = SQLiteStore(get_state_db_path(config.storage.sqlite_path))
-        self.store.initialize()
-        bootstrap_key = get_bootstrap_admin_key(config.auth.bootstrap_admin_key)
-        self.api_keys = ApiKeyManager(self.store, bootstrap_key)
-        self.mapper = SchemaMapper(config)
-        self.policy = QueryPolicyEngine(config)
-        self.adapter = ElasticsearchAdapter(config.backend.url, config.backend.index)
+        with self._reload_lock:
+            self.config_manager.save(config)
+            self.store = SQLiteStore(get_state_db_path(config.storage.sqlite_path))
+            self.store.initialize()
+            bootstrap_key, _ = resolve_bootstrap_admin_key(config.auth.bootstrap_admin_key)
+            self.api_keys = ApiKeyManager(self.store, bootstrap_key)
+            self.mapper = SchemaMapper(config)
+            self.policy = QueryPolicyEngine(config)
+            self.adapter = ElasticsearchAdapter(config.backend.url, config.backend.index)
 
 
 container = Container()

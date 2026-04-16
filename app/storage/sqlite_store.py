@@ -4,7 +4,7 @@ import hashlib
 import secrets
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 
@@ -84,10 +84,15 @@ class SQLiteStore:
                 CREATE TABLE IF NOT EXISTS ui_sessions (
                     token TEXT PRIMARY KEY,
                     key_id TEXT NOT NULL,
-                    created_at TEXT NOT NULL
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT
                 );
                 """
             )
+            # Idempotent migration: add expires_at on databases created before this change.
+            cols = {row["name"] for row in conn.execute("PRAGMA table_info(ui_sessions)").fetchall()}
+            if "expires_at" not in cols:
+                conn.execute("ALTER TABLE ui_sessions ADD COLUMN expires_at TEXT")
 
     @staticmethod
     def _hash_key(key: str) -> str:
@@ -158,27 +163,47 @@ class SQLiteStore:
             )
             return record
 
-    def create_ui_session(self, key_id: str) -> str:
+    def create_ui_session(self, key_id: str, ttl_hours: int = 12) -> str:
         token = secrets.token_urlsafe(32)
+        now = datetime.now(timezone.utc)
+        expires_at = (now + timedelta(hours=max(1, int(ttl_hours)))).isoformat()
         with self._connect() as conn:
             conn.execute(
-                "INSERT INTO ui_sessions(token, key_id, created_at) VALUES (?, ?, ?)",
-                (token, key_id, datetime.now(timezone.utc).isoformat()),
+                "INSERT INTO ui_sessions(token, key_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
+                (token, key_id, now.isoformat(), expires_at),
             )
         return token
 
     def get_ui_session_key_id(self, token: str | None) -> str | None:
         if not token:
             return None
+        now_iso = datetime.now(timezone.utc).isoformat()
         with self._connect() as conn:
-            row = conn.execute("SELECT key_id FROM ui_sessions WHERE token = ?", (token,)).fetchone()
-        return str(row["key_id"]) if row else None
+            row = conn.execute(
+                "SELECT key_id, expires_at FROM ui_sessions WHERE token = ?", (token,)
+            ).fetchone()
+            if not row:
+                return None
+            expires_at = row["expires_at"]
+            if expires_at is not None and expires_at <= now_iso:
+                conn.execute("DELETE FROM ui_sessions WHERE token = ?", (token,))
+                return None
+        return str(row["key_id"])
 
     def delete_ui_session(self, token: str | None) -> None:
         if not token:
             return
         with self._connect() as conn:
             conn.execute("DELETE FROM ui_sessions WHERE token = ?", (token,))
+
+    def purge_expired_ui_sessions(self) -> int:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            cur = conn.execute(
+                "DELETE FROM ui_sessions WHERE expires_at IS NOT NULL AND expires_at <= ?",
+                (now_iso,),
+            )
+        return int(cur.rowcount or 0)
 
     def get_quota(self, scope: str, default_max: int, default_window: int) -> tuple[int, int]:
         with self._connect() as conn:

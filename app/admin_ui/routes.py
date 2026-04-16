@@ -78,7 +78,15 @@ async def login_submit(request: Request) -> HTMLResponse:
         return _page(request, "Admin sign in", body, status_code=401)
 
     response = RedirectResponse("/admin/ui", status_code=303)
-    response.set_cookie(SESSION_COOKIE, token, httponly=True, secure=False, samesite="lax")
+    auth_cfg = container.config_manager.config.auth
+    samesite = auth_cfg.admin_cookie_samesite if auth_cfg.admin_cookie_samesite in {"strict", "lax", "none"} else "strict"
+    response.set_cookie(
+        SESSION_COOKIE,
+        token,
+        httponly=True,
+        secure=auth_cfg.admin_cookie_secure,
+        samesite=samesite,
+    )
     return response
 
 

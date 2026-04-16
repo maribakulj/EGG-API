@@ -22,7 +22,17 @@ class BackendConfig(BaseModel):
 
 class AuthConfig(BaseModel):
     public_mode: str = "anonymous_allowed"  # anonymous_allowed | api_key_optional | api_key_required
-    bootstrap_admin_key: str = "admin-change-me"
+    bootstrap_admin_key: str = ""
+    admin_cookie_secure: bool = True
+    admin_cookie_samesite: str = "strict"
+    admin_session_ttl_hours: int = 12
+
+
+class CorsConfig(BaseModel):
+    mode: str = "off"  # off | allowlist | wide_open
+    allow_origins: list[str] = Field(default_factory=list)
+    allow_methods: list[str] = Field(default_factory=lambda: ["GET"])
+    allow_headers: list[str] = Field(default_factory=lambda: ["x-api-key", "content-type"])
 
 
 class StorageConfig(BaseModel):
@@ -50,6 +60,7 @@ class AppConfig(BaseModel):
         }
     )
     auth: AuthConfig = Field(default_factory=AuthConfig)
+    cors: CorsConfig = Field(default_factory=CorsConfig)
     allowed_sorts: list[str] = Field(default_factory=lambda: ["relevance", "date_desc", "date_asc", "title_asc"])
     allowed_facets: list[str] = Field(default_factory=lambda: ["type", "language", "collection", "institution", "subject"])
     allowed_include_fields: list[str] = Field(default_factory=lambda: ["id", "type", "title", "description", "creators"])

@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+import os
+import tempfile
+
+# Pin env vars before any app modules load so the container doesn't
+# generate a sidecar file under the repo working tree.
+os.environ.setdefault("PISCO_BOOTSTRAP_ADMIN_KEY", "test-admin-key-abcdefghijklmnop")
+os.environ.setdefault("PISCO_HOME", tempfile.mkdtemp(prefix="pisco-test-home-"))
+
 from typing import Any
 
 import pytest
@@ -53,12 +61,18 @@ class FakeAdapter:
 def reset_container(tmp_path) -> None:
     container.adapter = FakeAdapter()
     container.rate_limiter = InMemoryRateLimiter()
-    container.config_manager._config = AppConfig()
+    cfg = AppConfig()
+    # TestClient talks http://, so secure cookies would never round-trip.
+    cfg.auth.admin_cookie_secure = False
+    cfg.auth.admin_cookie_samesite = "lax"
+    # Deterministic admin key for tests without requiring a sidecar file.
+    cfg.auth.bootstrap_admin_key = "test-admin-key-abcdefghijklmnop"
+    container.config_manager._config = cfg
     container.store = SQLiteStore(tmp_path / "state.sqlite3")
     container.store.initialize()
-    container.api_keys = ApiKeyManager(container.store, container.config_manager.config.auth.bootstrap_admin_key)
-    container.mapper = SchemaMapper(container.config_manager.config)
-    container.policy = QueryPolicyEngine(container.config_manager.config)
+    container.api_keys = ApiKeyManager(container.store, cfg.auth.bootstrap_admin_key)
+    container.mapper = SchemaMapper(cfg)
+    container.policy = QueryPolicyEngine(cfg)
     yield
 
 
