@@ -63,6 +63,16 @@ def login_page(request: Request) -> HTMLResponse:
 
 @router.post("/login", response_class=HTMLResponse)
 async def login_submit(request: Request) -> HTMLResponse:
+    # Anti-brute-force: bucket by client IP. Runs BEFORE credential check so a
+    # stuffing attacker can't bypass the cap by always sending a fresh key.
+    client_ip = request.client.host if request.client else "anonymous"
+    if not container.login_rate_limiter.allow(f"admin_login:{client_ip}"):
+        body = """
+<h2>Admin sign in</h2>
+<p class='error'>Too many attempts. Please try again later.</p>
+"""
+        return _page(request, "Admin sign in", body, status_code=429)
+
     data = await _form(request)
     try:
         token = create_ui_session_for_api_key(data.get("api_key", ""))

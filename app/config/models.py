@@ -18,6 +18,21 @@ class BackendConfig(BaseModel):
     type: str = "elasticsearch"
     url: str = "http://localhost:9200"
     index: str = "records"
+    timeout_seconds: float = 15.0
+    max_retries: int = 2
+    retry_backoff_seconds: float = 0.2
+
+
+class CacheConfig(BaseModel):
+    public_max_age_seconds: int = 60
+    enabled: bool = True
+
+
+class RateLimitConfig(BaseModel):
+    public_max_requests: int = 60
+    public_window_seconds: int = 60
+    admin_login_max_requests: int = 10
+    admin_login_window_seconds: int = 300
 
 
 class AuthConfig(BaseModel):
@@ -61,6 +76,8 @@ class AppConfig(BaseModel):
     )
     auth: AuthConfig = Field(default_factory=AuthConfig)
     cors: CorsConfig = Field(default_factory=CorsConfig)
+    cache: CacheConfig = Field(default_factory=CacheConfig)
+    rate_limit: RateLimitConfig = Field(default_factory=RateLimitConfig)
     allowed_sorts: list[str] = Field(default_factory=lambda: ["relevance", "date_desc", "date_asc", "title_asc"])
     allowed_facets: list[str] = Field(default_factory=lambda: ["type", "language", "collection", "institution", "subject"])
     allowed_include_fields: list[str] = Field(default_factory=lambda: ["id", "type", "title", "description", "creators"])

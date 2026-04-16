@@ -34,11 +34,24 @@ class Container:
                 "Set PISCO_BOOTSTRAP_ADMIN_KEY to pin it across restarts.\n"
             )
         self.api_keys = ApiKeyManager(self.store, bootstrap_key)
-        self.rate_limiter = InMemoryRateLimiter()
+        self.rate_limiter = InMemoryRateLimiter(
+            max_requests=config.rate_limit.public_max_requests,
+            window_seconds=config.rate_limit.public_window_seconds,
+        )
+        self.login_rate_limiter = InMemoryRateLimiter(
+            max_requests=config.rate_limit.admin_login_max_requests,
+            window_seconds=config.rate_limit.admin_login_window_seconds,
+        )
         self.mapper = SchemaMapper(config)
         self.mapping_health = MappingHealthService()
         self.policy = QueryPolicyEngine(config)
-        self.adapter = ElasticsearchAdapter(config.backend.url, config.backend.index)
+        self.adapter = ElasticsearchAdapter(
+            config.backend.url,
+            config.backend.index,
+            timeout_seconds=config.backend.timeout_seconds,
+            max_retries=config.backend.max_retries,
+            retry_backoff_seconds=config.backend.retry_backoff_seconds,
+        )
 
     def reload(self, config: AppConfig) -> None:
         with self._reload_lock:
@@ -47,9 +60,23 @@ class Container:
             self.store.initialize()
             bootstrap_key, _ = resolve_bootstrap_admin_key(config.auth.bootstrap_admin_key)
             self.api_keys = ApiKeyManager(self.store, bootstrap_key)
+            self.rate_limiter = InMemoryRateLimiter(
+                max_requests=config.rate_limit.public_max_requests,
+                window_seconds=config.rate_limit.public_window_seconds,
+            )
+            self.login_rate_limiter = InMemoryRateLimiter(
+                max_requests=config.rate_limit.admin_login_max_requests,
+                window_seconds=config.rate_limit.admin_login_window_seconds,
+            )
             self.mapper = SchemaMapper(config)
             self.policy = QueryPolicyEngine(config)
-            self.adapter = ElasticsearchAdapter(config.backend.url, config.backend.index)
+            self.adapter = ElasticsearchAdapter(
+                config.backend.url,
+                config.backend.index,
+                timeout_seconds=config.backend.timeout_seconds,
+                max_retries=config.backend.max_retries,
+                retry_backoff_seconds=config.backend.retry_backoff_seconds,
+            )
 
 
 container = Container()
