@@ -1,15 +1,30 @@
 from __future__ import annotations
 
-import logging
 import time
 from typing import Any
 
 import httpx
 
 from app.errors import AppError
+from app.logging import get_logger
+from app.metrics import backend_errors
 from app.schemas.query import NormalizedQuery
 
-logger = logging.getLogger(__name__)
+logger = get_logger("pisco.adapter.es")
+
+
+def _record_backend_error(error_code: str) -> None:
+    backend_errors.labels(error_code=error_code).inc()
+
+
+def _parse_major_version(version: str) -> int | None:
+    if not version:
+        return None
+    head = version.split(".", 1)[0]
+    try:
+        return int(head)
+    except ValueError:
+        return None
 
 _TRANSIENT_HTTP_EXCEPTIONS: tuple[type[BaseException], ...] = (
     httpx.TimeoutException,
@@ -56,14 +71,15 @@ class ElasticsearchAdapter:
             except _TRANSIENT_HTTP_EXCEPTIONS as exc:
                 last_exc = exc
                 logger.warning(
-                    "backend transient error (attempt %d/%d) on %s %s: %s",
-                    attempt + 1,
-                    attempts,
-                    method,
-                    url,
-                    exc,
+                    "backend_transient_error",
+                    attempt=attempt + 1,
+                    attempts=attempts,
+                    method=method,
+                    url=url,
+                    error=str(exc),
                 )
                 if attempt + 1 >= attempts:
+                    _record_backend_error("backend_unavailable")
                     raise AppError(
                         "backend_unavailable",
                         "Backend is unavailable",
@@ -75,18 +91,18 @@ class ElasticsearchAdapter:
 
             if response.status_code >= 500 and attempt + 1 < attempts:
                 logger.warning(
-                    "backend 5xx (attempt %d/%d) on %s %s: status=%d",
-                    attempt + 1,
-                    attempts,
-                    method,
-                    url,
-                    response.status_code,
+                    "backend_5xx",
+                    attempt=attempt + 1,
+                    attempts=attempts,
+                    method=method,
+                    url=url,
+                    status_code=response.status_code,
                 )
                 time.sleep(self.retry_backoff_seconds * (2 ** attempt))
                 continue
             return response
 
-        # Should be unreachable — fall back to a typed error.
+        _record_backend_error("backend_unavailable")
         raise AppError(
             "backend_unavailable",
             "Backend is unavailable",
@@ -94,18 +110,34 @@ class ElasticsearchAdapter:
             503,
         )
 
+    _MIN_SUPPORTED_MAJOR_VERSION = 7
+
     def detect(self) -> dict[str, Any]:
         response = self._request("GET", f"{self.base_url}")
         try:
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
+            _record_backend_error("backend_unavailable")
             raise AppError(
                 "backend_unavailable",
                 "Could not detect backend",
                 {"reason": str(exc), "status_code": response.status_code},
                 503,
             ) from exc
-        return {"detected": True, "version": response.json().get("version", {})}
+
+        version_info = response.json().get("version", {}) or {}
+        version_number = str(version_info.get("number", ""))
+        major = _parse_major_version(version_number)
+        if major is not None and major < self._MIN_SUPPORTED_MAJOR_VERSION:
+            _record_backend_error("unsupported_backend_version")
+            raise AppError(
+                "unsupported_backend_version",
+                f"Elasticsearch {version_number} is not supported; "
+                f"requires {self._MIN_SUPPORTED_MAJOR_VERSION}+",
+                {"version": version_number, "minimum_major": self._MIN_SUPPORTED_MAJOR_VERSION},
+                503,
+            )
+        return {"detected": True, "version": version_info}
 
     def health(self) -> dict[str, Any]:
         response = self._request("GET", f"{self.base_url}/_cluster/health")

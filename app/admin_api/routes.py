@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Body, Depends, Request
+from dataclasses import asdict
+
+from fastapi import APIRouter, Body, Depends, Query, Request
 
 from app.auth.dependencies import require_admin_key
 from app.config.models import AppConfig
@@ -56,6 +58,21 @@ def test_query(request: Request) -> dict[str, object]:
     """Translate the provided query into the backend DSL without executing it."""
     nq = container.policy.parse(request)
     return {"translated": container.adapter.translate_query(nq)}
+
+
+@router.get("/usage")
+def usage_events(
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+) -> dict[str, object]:
+    """Paginated listing of recent usage events."""
+    events = container.store.list_recent_usage_events(limit=limit, offset=offset)
+    return {
+        "total": container.store.count_usage_events(),
+        "limit": limit,
+        "offset": offset,
+        "events": [asdict(e) for e in events],
+    }
 
 
 @router.get("/status")

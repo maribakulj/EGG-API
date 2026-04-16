@@ -87,12 +87,30 @@ class SQLiteStore:
                     created_at TEXT NOT NULL,
                     expires_at TEXT
                 );
+
+                -- Hot-path indexes. Covering the filters/order-by columns avoids
+                -- full table scans once usage_events grows past a few thousand rows.
+                CREATE INDEX IF NOT EXISTS idx_api_keys_hash
+                    ON api_keys(key_hash);
+                CREATE INDEX IF NOT EXISTS idx_usage_events_timestamp
+                    ON usage_events(timestamp DESC);
+                CREATE INDEX IF NOT EXISTS idx_usage_events_subject
+                    ON usage_events(subject);
+                CREATE INDEX IF NOT EXISTS idx_usage_events_status
+                    ON usage_events(status_code);
+                CREATE INDEX IF NOT EXISTS idx_quota_counters_subject
+                    ON quota_counters(subject);
                 """
             )
             # Idempotent migration: add expires_at on databases created before this change.
             cols = {row["name"] for row in conn.execute("PRAGMA table_info(ui_sessions)").fetchall()}
             if "expires_at" not in cols:
                 conn.execute("ALTER TABLE ui_sessions ADD COLUMN expires_at TEXT")
+            # Must come AFTER the migration above: the column may not exist yet on
+            # upgraded databases when this index is first declared.
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ui_sessions_expires ON ui_sessions(expires_at)"
+            )
 
     @staticmethod
     def _hash_key(key: str) -> str:
@@ -285,18 +303,27 @@ class SQLiteStore:
                 ),
             )
 
-    def list_recent_usage_events(self, limit: int = 100) -> list[UsageEvent]:
+    def list_recent_usage_events(
+        self, limit: int = 100, offset: int = 0
+    ) -> list[UsageEvent]:
+        safe_limit = max(1, min(int(limit), 1000))
+        safe_offset = max(0, int(offset))
         with self._connect() as conn:
             rows = conn.execute(
                 """
                 SELECT timestamp, endpoint, method, status_code, api_key_id, subject, latency_ms, error_code
                 FROM usage_events
                 ORDER BY id DESC
-                LIMIT ?
+                LIMIT ? OFFSET ?
                 """,
-                (limit,),
+                (safe_limit, safe_offset),
             ).fetchall()
         return [UsageEvent(**dict(row)) for row in rows]
+
+    def count_usage_events(self) -> int:
+        with self._connect() as conn:
+            row = conn.execute("SELECT COUNT(*) AS c FROM usage_events").fetchone()
+        return int(row["c"]) if row else 0
 
     def usage_summary(self) -> dict[str, int]:
         with self._connect() as conn:
