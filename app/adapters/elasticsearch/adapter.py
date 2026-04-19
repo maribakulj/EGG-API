@@ -1,3 +1,13 @@
+"""Elasticsearch adapter.
+
+Wraps an ``httpx.Client`` (with ``follow_redirects=False`` to block SSRF via
+backend redirects) and centralizes retry + typed-error behavior: transient
+httpx failures and 5xx responses are retried with exponential backoff, and
+exhaustion surfaces as :class:`AppError` (``backend_unavailable``, 503).
+``translate_query`` builds the ES DSL in a single pass so ``search()`` and
+``get_facets()`` never round-trip twice for the same call. Minor version
+gating blocks Elasticsearch < 7.
+"""
 from __future__ import annotations
 
 import time

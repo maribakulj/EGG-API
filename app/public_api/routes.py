@@ -83,3 +83,65 @@ def facets(
     if cached is not None:
         return cached
     return {"facets": container.adapter.get_facets(nq)}
+
+
+# ---------------------------------------------------------------------------
+# Optional V1 endpoints (SPECS.md §12). /collections and /schema are active;
+# /suggest and /manifest/{id} are declared but return 501 until their backend
+# plumbing is contributed — this keeps the OpenAPI surface honest.
+# ---------------------------------------------------------------------------
+
+
+@router.get("/collections")
+def collections(_: None = Depends(enforce_public_auth)) -> dict[str, object]:
+    """Return publicly exposed collections (SPECS §12.1)."""
+    sources = container.adapter.list_sources()
+    return {"collections": [{"id": name, "label": name} for name in sources]}
+
+
+@router.get("/schema")
+def public_schema(_: None = Depends(enforce_public_auth)) -> dict[str, object]:
+    """Return the active public schema for ``Record`` (SPECS §12.4).
+
+    Only exposes the *activated* fields (mapping + allowed_include_fields)
+    plus the facet and sort allowlists.
+    """
+    cfg = container.config_manager.config
+    fields = []
+    for name, rule in cfg.mapping.items():
+        fields.append(
+            {
+                "name": name,
+                "mode": rule.mode,
+                "criticality": rule.criticality,
+            }
+        )
+    return {
+        "fields": fields,
+        "allowed_include_fields": list(cfg.allowed_include_fields),
+        "allowed_facets": list(cfg.allowed_facets),
+        "allowed_sorts": list(cfg.allowed_sorts),
+        "filters": sorted(container.policy.filter_params),
+    }
+
+
+@router.get("/suggest")
+def suggest(_: None = Depends(enforce_public_auth)) -> dict[str, object]:
+    """Autocomplete suggestions (SPECS §12.2). Not yet implemented."""
+    raise AppError(
+        "not_implemented",
+        "The /v1/suggest endpoint is declared but not yet implemented.",
+        {"spec": "SPECS.md §12.2"},
+        status_code=501,
+    )
+
+
+@router.get("/manifest/{record_id}")
+def manifest(record_id: str, _: None = Depends(enforce_public_auth)) -> dict[str, object]:
+    """IIIF manifest passthrough (SPECS §12.3). Not yet implemented."""
+    raise AppError(
+        "not_implemented",
+        "The /v1/manifest/{id} endpoint is declared but not yet implemented.",
+        {"spec": "SPECS.md §12.3", "record_id": record_id},
+        status_code=501,
+    )

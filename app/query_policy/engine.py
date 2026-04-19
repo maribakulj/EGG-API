@@ -1,3 +1,13 @@
+"""Query Policy Engine.
+
+Parses HTTP query parameters into a :class:`NormalizedQuery` while enforcing
+the active :class:`SecurityProfile`: allow/deny lists for sorts, facets, and
+``include_fields``; hard caps on page size and pagination depth; boolean and
+integer parsing that never leaks raw exceptions to callers. The engine also
+exposes :meth:`compute_cache_key` (stable SHA-256 over the normalized query)
+for ETag generation, and :meth:`redact_for_logs` to strip ``q`` before the
+structured logger serializes the event.
+"""
 from __future__ import annotations
 
 import hashlib

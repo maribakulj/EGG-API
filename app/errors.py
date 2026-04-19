@@ -1,3 +1,11 @@
+"""Canonical application error type and JSON renderer.
+
+All user-visible failures flow through :class:`AppError`, which carries a
+machine-readable ``code``, a human ``message``, a ``details`` mapping, and
+the HTTP ``status_code`` to emit. :func:`to_error_response` renders the
+payload in the shape specified in SPECS.md §19 and always includes the
+request id so logs and client traces can be joined.
+"""
 from __future__ import annotations
 
 from fastapi import Request

@@ -1,6 +1,14 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+
+_VALID_CRITICALITIES = {"required", "recommended", "optional"}
+_VALID_AUTH_MODES = {"anonymous_allowed", "api_key_optional", "api_key_required"}
+_VALID_CORS_MODES = {"off", "allowlist", "wide_open"}
+# Structural public fields that are synthesized by the mapper regardless of
+# the declared mapping block; they always count as "mapped".
+_STRUCTURAL_FIELDS = {"id", "type"}
 
 
 class SecurityProfile(BaseModel):
@@ -63,6 +71,15 @@ class FieldMapping(BaseModel):
     template: str | None = None
     criticality: str = "optional"
 
+    @model_validator(mode="after")
+    def _validate_criticality(self) -> FieldMapping:
+        if self.criticality not in _VALID_CRITICALITIES:
+            raise ValueError(
+                f"criticality must be one of {sorted(_VALID_CRITICALITIES)}; "
+                f"got {self.criticality!r}"
+            )
+        return self
+
 
 class AppConfig(BaseModel):
     backend: BackendConfig = Field(default_factory=BackendConfig)
@@ -90,3 +107,49 @@ class AppConfig(BaseModel):
             "creators": FieldMapping(source="creator_csv", mode="split_list", separator=";"),
         }
     )
+
+    @model_validator(mode="after")
+    def _validate_cross_references(self) -> AppConfig:
+        # Security profile must exist in the profiles dict.
+        if self.security_profile not in self.profiles:
+            raise ValueError(
+                f"security_profile {self.security_profile!r} is not defined in "
+                f"profiles (known: {sorted(self.profiles)})"
+            )
+        # Auth public_mode must be one of the declared values.
+        if self.auth.public_mode not in _VALID_AUTH_MODES:
+            raise ValueError(
+                f"auth.public_mode must be one of {sorted(_VALID_AUTH_MODES)}; "
+                f"got {self.auth.public_mode!r}"
+            )
+        # CORS mode must be a known token.
+        if self.cors.mode not in _VALID_CORS_MODES:
+            raise ValueError(
+                f"cors.mode must be one of {sorted(_VALID_CORS_MODES)}; "
+                f"got {self.cors.mode!r}"
+            )
+        # Every allowed_include_field must either be a structural field or be
+        # explicitly declared in the mapping block — otherwise the API surface
+        # references a field the mapper will always return None for.
+        mapped_fields = _STRUCTURAL_FIELDS | set(self.mapping.keys())
+        unmapped = [f for f in self.allowed_include_fields if f not in mapped_fields]
+        if unmapped:
+            raise ValueError(
+                "allowed_include_fields references fields absent from mapping: "
+                f"{unmapped}"
+            )
+        # Required/recommended mapping rules must declare a source (or sources
+        # for first_non_empty, or a constant/template) — otherwise they can
+        # never succeed.
+        for name, rule in self.mapping.items():
+            if rule.criticality in {"required", "recommended"}:
+                has_source = bool(rule.source)
+                has_sources = bool(rule.sources)
+                has_constant = rule.constant is not None
+                has_template = rule.template is not None
+                if not (has_source or has_sources or has_constant or has_template):
+                    raise ValueError(
+                        f"mapping[{name!r}] is {rule.criticality} but declares "
+                        "no source/sources/constant/template"
+                    )
+        return self

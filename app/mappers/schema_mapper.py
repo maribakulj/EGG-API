@@ -1,3 +1,15 @@
+"""Backend-agnostic document mapping.
+
+:class:`SchemaMapper` turns a raw backend document (``doc``) into the public
+:class:`~app.schemas.record.Record`. Each public field is produced by a small
+mode (``direct``, ``split_list``, ``first_non_empty``, ``template``,
+``nested_object``, ``date_parser``, ``boolean_cast``, ``url_passthrough``) so
+the operator can compose a mapping from configuration alone without touching
+Python code. Mode helpers are defensive by design: invalid dates return
+``None`` rather than raising, URL passthrough validates scheme + host, and
+``raw_fields`` (enabled per security profile) drops any backend-internal key
+prefixed with ``_``.
+"""
 from __future__ import annotations
 
 import logging
