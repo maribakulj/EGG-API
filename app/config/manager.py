@@ -35,10 +35,28 @@ class ConfigManager:
         self._config = AppConfig.model_validate(data)
         return self._config
 
+    # Config keys that must never be serialized to the YAML file. Secrets should be
+    # provided via environment variable or a 0600 sidecar file instead.
+    _REDACTED_KEYS: tuple[tuple[str, ...], ...] = (("auth", "bootstrap_admin_key"),)
+
+    @classmethod
+    def _redact(cls, data: dict[str, object]) -> dict[str, object]:
+        for path in cls._REDACTED_KEYS:
+            cursor: object = data
+            for part in path[:-1]:
+                if not isinstance(cursor, dict) or part not in cursor:
+                    cursor = None
+                    break
+                cursor = cursor[part]
+            if isinstance(cursor, dict):
+                cursor.pop(path[-1], None)
+        return data
+
     def save(self, config: AppConfig) -> None:
         self._config = config
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(yaml.safe_dump(config.model_dump(mode="python"), sort_keys=False))
+        data = self._redact(config.model_dump(mode="python"))
+        self.path.write_text(yaml.safe_dump(data, sort_keys=False))
 
     def validate_data(self, data: dict[str, object]) -> tuple[bool, str | None]:
         try:

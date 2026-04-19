@@ -1,11 +1,36 @@
+"""Backend-agnostic document mapping.
+
+:class:`SchemaMapper` turns a raw backend document (``doc``) into the public
+:class:`~app.schemas.record.Record`. Each public field is produced by a small
+mode (``direct``, ``split_list``, ``first_non_empty``, ``template``,
+``nested_object``, ``date_parser``, ``boolean_cast``, ``url_passthrough``) so
+the operator can compose a mapping from configuration alone without touching
+Python code. Mode helpers are defensive by design: invalid dates return
+``None`` rather than raising, URL passthrough validates scheme + host, and
+``raw_fields`` (enabled per security profile) drops any backend-internal key
+prefixed with ``_``.
+"""
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from string import Template
 from typing import Any
+from urllib.parse import urlparse
 
 from app.config.models import AppConfig
 from app.schemas.record import Record
+
+logger = logging.getLogger(__name__)
+
+
+def _filter_internal_fields(doc: dict[str, Any]) -> dict[str, Any]:
+    """Drop backend-internal fields (``_id``, ``_score``, …) from raw_fields.
+
+    Public consumers must not see internal bookkeeping that could leak index
+    layout or scoring internals.
+    """
+    return {k: v for k, v in doc.items() if not (isinstance(k, str) and k.startswith("_"))}
 
 
 class SchemaMapper:
@@ -20,7 +45,7 @@ class SchemaMapper:
         mapped.setdefault("id", str(doc.get("id") or doc.get("_id") or ""))
         mapped.setdefault("type", str(doc.get("type") or "record"))
         if self.config.profiles[self.config.security_profile].allow_raw_fields:
-            mapped["raw_fields"] = doc
+            mapped["raw_fields"] = _filter_internal_fields(doc)
         return Record.model_validate(mapped)
 
     def _apply_mode(self, mode: str, rule: dict[str, Any], doc: dict[str, Any]) -> Any:
@@ -45,16 +70,41 @@ class SchemaMapper:
             source = rule.get("source", "")
             return doc.get(source) if isinstance(doc.get(source), dict) else {}
         if mode == "date_parser":
-            value = doc.get(rule.get("source", ""))
-            if not value:
-                return None
-            return datetime.fromisoformat(str(value).replace("Z", "+00:00")).date().isoformat()
+            return _parse_iso_date(doc.get(rule.get("source", "")), rule.get("source"))
         if mode == "boolean_cast":
             return bool(doc.get(rule.get("source", "")))
         if mode == "url_passthrough":
-            value = doc.get(rule.get("source", ""))
-            return value if isinstance(value, str) and value.startswith(("http://", "https://")) else None
+            return _safe_public_url(doc.get(rule.get("source", "")))
         return None
+
+
+def _parse_iso_date(value: Any, source_name: str | None = None) -> str | None:
+    """Parse an ISO date (or datetime) into YYYY-MM-DD; return None on failure."""
+    if value is None or value == "":
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (TypeError, ValueError) as exc:
+        logger.warning(
+            "date_parser: invalid value in source=%s reason=%s", source_name, exc
+        )
+        return None
+    return parsed.date().isoformat()
+
+
+def _safe_public_url(value: Any) -> str | None:
+    """Return ``value`` only if it is a well-formed absolute http(s) URL."""
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = urlparse(value)
+    except ValueError:
+        return None
+    if parsed.scheme not in {"http", "https"}:
+        return None
+    if not parsed.netloc:
+        return None
+    return value
 
 
 class MappingHealthService:

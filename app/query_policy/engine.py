@@ -1,6 +1,17 @@
+"""Query Policy Engine.
+
+Parses HTTP query parameters into a :class:`NormalizedQuery` while enforcing
+the active :class:`SecurityProfile`: allow/deny lists for sorts, facets, and
+``include_fields``; hard caps on page size and pagination depth; boolean and
+integer parsing that never leaks raw exceptions to callers. The engine also
+exposes :meth:`compute_cache_key` (stable SHA-256 over the normalized query)
+for ETag generation, and :meth:`redact_for_logs` to strip ``q`` before the
+structured logger serializes the event.
+"""
 from __future__ import annotations
 
 import hashlib
+import json
 
 from fastapi import Request
 
@@ -33,14 +44,31 @@ class QueryPolicyEngine:
         if not q and not self.profile.allow_empty_query:
             raise AppError("missing_parameter", "q is required for this profile", {"parameter": "q"})
 
-        page = int(qp.get("page", "1"))
-        page_size = int(qp.get("page_size", str(self.profile.page_size_default)))
+        try:
+            page = int(qp.get("page", "1"))
+            page_size = int(qp.get("page_size", str(self.profile.page_size_default)))
+        except ValueError as exc:
+            raise AppError(
+                "invalid_parameter",
+                "page and page_size must be integers",
+                {"reason": str(exc)},
+            ) from exc
         if page < 1 or page_size < 1:
             raise AppError("invalid_parameter", "page and page_size must be positive")
         if page_size > self.profile.page_size_max:
-            raise AppError("invalid_parameter", "page_size exceeds policy", {"max": self.profile.page_size_max})
-        if page * page_size > self.profile.max_depth:
-            raise AppError("unsupported_operation", "Deep pagination is not supported", {"max_depth": self.profile.max_depth})
+            raise AppError(
+                "invalid_parameter",
+                "page_size exceeds policy",
+                {"max": self.profile.page_size_max, "requested": page_size},
+            )
+        # ES rejects reads past `from + size`; that's page * page_size here.
+        requested_depth = page * page_size
+        if requested_depth > self.profile.max_depth:
+            raise AppError(
+                "unsupported_operation",
+                "Deep pagination is not supported",
+                {"max_depth": self.profile.max_depth, "requested": requested_depth},
+            )
 
         sort = qp.get("sort")
         if sort and sort not in self.config.allowed_sorts:
@@ -75,7 +103,10 @@ class QueryPolicyEngine:
         )
 
     def compute_cache_key(self, nq: NormalizedQuery) -> str:
-        return hashlib.sha256(nq.model_dump_json(sort_keys=True).encode()).hexdigest()
+        # Pydantic v2's ``model_dump_json`` has no ``sort_keys``; use json.dumps
+        # on the plain dict so the hash is stable regardless of dict ordering.
+        payload = json.dumps(nq.model_dump(mode="python"), sort_keys=True, default=str)
+        return hashlib.sha256(payload.encode()).hexdigest()
 
     def redact_for_logs(self, nq: NormalizedQuery) -> dict[str, object]:
         data = nq.model_dump(mode="python")
@@ -87,8 +118,9 @@ class QueryPolicyEngine:
     def _parse_bool(value: str | None) -> bool | None:
         if value is None:
             return None
-        if value.lower() in {"true", "1", "yes"}:
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "on"}:
             return True
-        if value.lower() in {"false", "0", "no"}:
+        if normalized in {"false", "0", "no", "off"}:
             return False
         raise AppError("invalid_parameter", "Invalid boolean value", {"value": value})

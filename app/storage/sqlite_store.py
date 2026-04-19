@@ -4,7 +4,7 @@ import hashlib
 import secrets
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 
@@ -84,9 +84,32 @@ class SQLiteStore:
                 CREATE TABLE IF NOT EXISTS ui_sessions (
                     token TEXT PRIMARY KEY,
                     key_id TEXT NOT NULL,
-                    created_at TEXT NOT NULL
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT
                 );
+
+                -- Hot-path indexes. Covering the filters/order-by columns avoids
+                -- full table scans once usage_events grows past a few thousand rows.
+                CREATE INDEX IF NOT EXISTS idx_api_keys_hash
+                    ON api_keys(key_hash);
+                CREATE INDEX IF NOT EXISTS idx_usage_events_timestamp
+                    ON usage_events(timestamp DESC);
+                CREATE INDEX IF NOT EXISTS idx_usage_events_subject
+                    ON usage_events(subject);
+                CREATE INDEX IF NOT EXISTS idx_usage_events_status
+                    ON usage_events(status_code);
+                CREATE INDEX IF NOT EXISTS idx_quota_counters_subject
+                    ON quota_counters(subject);
                 """
+            )
+            # Idempotent migration: add expires_at on databases created before this change.
+            cols = {row["name"] for row in conn.execute("PRAGMA table_info(ui_sessions)").fetchall()}
+            if "expires_at" not in cols:
+                conn.execute("ALTER TABLE ui_sessions ADD COLUMN expires_at TEXT")
+            # Must come AFTER the migration above: the column may not exist yet on
+            # upgraded databases when this index is first declared.
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ui_sessions_expires ON ui_sessions(expires_at)"
             )
 
     @staticmethod
@@ -158,27 +181,47 @@ class SQLiteStore:
             )
             return record
 
-    def create_ui_session(self, key_id: str) -> str:
+    def create_ui_session(self, key_id: str, ttl_hours: int = 12) -> str:
         token = secrets.token_urlsafe(32)
+        now = datetime.now(timezone.utc)
+        expires_at = (now + timedelta(hours=max(1, int(ttl_hours)))).isoformat()
         with self._connect() as conn:
             conn.execute(
-                "INSERT INTO ui_sessions(token, key_id, created_at) VALUES (?, ?, ?)",
-                (token, key_id, datetime.now(timezone.utc).isoformat()),
+                "INSERT INTO ui_sessions(token, key_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
+                (token, key_id, now.isoformat(), expires_at),
             )
         return token
 
     def get_ui_session_key_id(self, token: str | None) -> str | None:
         if not token:
             return None
+        now_iso = datetime.now(timezone.utc).isoformat()
         with self._connect() as conn:
-            row = conn.execute("SELECT key_id FROM ui_sessions WHERE token = ?", (token,)).fetchone()
-        return str(row["key_id"]) if row else None
+            row = conn.execute(
+                "SELECT key_id, expires_at FROM ui_sessions WHERE token = ?", (token,)
+            ).fetchone()
+            if not row:
+                return None
+            expires_at = row["expires_at"]
+            if expires_at is not None and expires_at <= now_iso:
+                conn.execute("DELETE FROM ui_sessions WHERE token = ?", (token,))
+                return None
+        return str(row["key_id"])
 
     def delete_ui_session(self, token: str | None) -> None:
         if not token:
             return
         with self._connect() as conn:
             conn.execute("DELETE FROM ui_sessions WHERE token = ?", (token,))
+
+    def purge_expired_ui_sessions(self) -> int:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            cur = conn.execute(
+                "DELETE FROM ui_sessions WHERE expires_at IS NOT NULL AND expires_at <= ?",
+                (now_iso,),
+            )
+        return int(cur.rowcount or 0)
 
     def get_quota(self, scope: str, default_max: int, default_window: int) -> tuple[int, int]:
         with self._connect() as conn:
@@ -260,18 +303,27 @@ class SQLiteStore:
                 ),
             )
 
-    def list_recent_usage_events(self, limit: int = 100) -> list[UsageEvent]:
+    def list_recent_usage_events(
+        self, limit: int = 100, offset: int = 0
+    ) -> list[UsageEvent]:
+        safe_limit = max(1, min(int(limit), 1000))
+        safe_offset = max(0, int(offset))
         with self._connect() as conn:
             rows = conn.execute(
                 """
                 SELECT timestamp, endpoint, method, status_code, api_key_id, subject, latency_ms, error_code
                 FROM usage_events
                 ORDER BY id DESC
-                LIMIT ?
+                LIMIT ? OFFSET ?
                 """,
-                (limit,),
+                (safe_limit, safe_offset),
             ).fetchall()
         return [UsageEvent(**dict(row)) for row in rows]
+
+    def count_usage_events(self) -> int:
+        with self._connect() as conn:
+            row = conn.execute("SELECT COUNT(*) AS c FROM usage_events").fetchone()
+        return int(row["c"]) if row else 0
 
     def usage_summary(self) -> dict[str, int]:
         with self._connect() as conn:

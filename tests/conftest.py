@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+import os
+import tempfile
+
+# Pin env vars before any app modules load so the container doesn't
+# generate a sidecar file under the repo working tree.
+os.environ.setdefault("PISCO_BOOTSTRAP_ADMIN_KEY", "test-admin-key-abcdefghijklmnop")
+os.environ.setdefault("PISCO_HOME", tempfile.mkdtemp(prefix="pisco-test-home-"))
+
 from typing import Any
 
 import pytest
@@ -28,7 +36,7 @@ class FakeAdapter:
     def scan_fields(self) -> dict[str, Any]:
         return {"records": {"mappings": {"properties": {"title": {"type": "text"}}}}}
 
-    def translate_query(self, query: NormalizedQuery) -> dict[str, Any]:
+    def translate_query(self, query: NormalizedQuery, **_: Any) -> dict[str, Any]:
         return {"query": query.model_dump(mode="python")}
 
     def search(self, query: NormalizedQuery) -> dict[str, Any]:
@@ -48,17 +56,33 @@ class FakeAdapter:
     def get_facets(self, query: NormalizedQuery) -> dict[str, dict[str, int]]:
         return {"type": {"object": 1}}
 
+    @staticmethod
+    def extract_facets(payload: dict[str, Any]) -> dict[str, dict[str, int]]:
+        aggs = payload.get("aggregations", {}) or {}
+        result: dict[str, dict[str, int]] = {}
+        for facet, values in aggs.items():
+            buckets = values.get("buckets", []) if isinstance(values, dict) else []
+            result[facet] = {b["key"]: b["doc_count"] for b in buckets}
+        return result
+
 
 @pytest.fixture(autouse=True)
 def reset_container(tmp_path) -> None:
     container.adapter = FakeAdapter()
     container.rate_limiter = InMemoryRateLimiter()
-    container.config_manager._config = AppConfig()
+    container.login_rate_limiter = InMemoryRateLimiter(max_requests=1000, window_seconds=60)
+    cfg = AppConfig()
+    # TestClient talks http://, so secure cookies would never round-trip.
+    cfg.auth.admin_cookie_secure = False
+    cfg.auth.admin_cookie_samesite = "lax"
+    # Deterministic admin key for tests without requiring a sidecar file.
+    cfg.auth.bootstrap_admin_key = "test-admin-key-abcdefghijklmnop"
+    container.config_manager._config = cfg
     container.store = SQLiteStore(tmp_path / "state.sqlite3")
     container.store.initialize()
-    container.api_keys = ApiKeyManager(container.store, container.config_manager.config.auth.bootstrap_admin_key)
-    container.mapper = SchemaMapper(container.config_manager.config)
-    container.policy = QueryPolicyEngine(container.config_manager.config)
+    container.api_keys = ApiKeyManager(container.store, cfg.auth.bootstrap_admin_key)
+    container.mapper = SchemaMapper(cfg)
+    container.policy = QueryPolicyEngine(cfg)
     yield
 
 

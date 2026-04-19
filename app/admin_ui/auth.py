@@ -12,7 +12,8 @@ def create_ui_session_for_api_key(api_key: str) -> str:
     identity = container.api_keys.get_identity(api_key)
     if not identity:
         raise AppError("invalid_api_key", "Invalid admin API key", status_code=401)
-    return container.store.create_ui_session(identity.key_id)
+    ttl_hours = container.config_manager.config.auth.admin_session_ttl_hours
+    return container.store.create_ui_session(identity.key_id, ttl_hours=ttl_hours)
 
 
 def get_ui_key_id(request: Request) -> str | None:
