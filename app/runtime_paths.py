@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import os
 import secrets
 import stat
@@ -59,11 +60,9 @@ def _read_sidecar_key(path: Path) -> str | None:
 def _write_sidecar_key(path: Path, key: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(key)
-    try:
+    # Best-effort on platforms that don't support chmod semantics.
+    with contextlib.suppress(OSError):
         path.chmod(stat.S_IRUSR | stat.S_IWUSR)
-    except OSError:
-        # Best-effort on platforms that don't support chmod semantics.
-        pass
 
 
 def resolve_bootstrap_admin_key(config_value: str) -> tuple[str, bool]:

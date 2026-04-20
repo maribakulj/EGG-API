@@ -8,6 +8,7 @@ exhaustion surfaces as :class:`AppError` (``backend_unavailable``, 503).
 ``get_facets()`` never round-trip twice for the same call. Minor version
 gating blocks Elasticsearch < 7.
 """
+
 from __future__ import annotations
 
 import time
@@ -35,6 +36,7 @@ def _parse_major_version(version: str) -> int | None:
         return int(head)
     except ValueError:
         return None
+
 
 _TRANSIENT_HTTP_EXCEPTIONS: tuple[type[BaseException], ...] = (
     httpx.TimeoutException,
@@ -96,7 +98,7 @@ class ElasticsearchAdapter:
                         {"reason": str(exc)},
                         503,
                     ) from exc
-                time.sleep(self.retry_backoff_seconds * (2 ** attempt))
+                time.sleep(self.retry_backoff_seconds * (2**attempt))
                 continue
 
             if response.status_code >= 500 and attempt + 1 < attempts:
@@ -108,7 +110,7 @@ class ElasticsearchAdapter:
                     url=url,
                     status_code=response.status_code,
                 )
-                time.sleep(self.retry_backoff_seconds * (2 ** attempt))
+                time.sleep(self.retry_backoff_seconds * (2**attempt))
                 continue
             return response
 
@@ -182,9 +184,7 @@ class ElasticsearchAdapter:
         max_buckets_per_facet: int | None = None,
     ) -> dict[str, Any]:
         bucket_size_default = (
-            self.max_buckets_per_facet
-            if max_buckets_per_facet is None
-            else max_buckets_per_facet
+            self.max_buckets_per_facet if max_buckets_per_facet is None else max_buckets_per_facet
         )
         must: list[dict[str, Any]] = []
         filter_clauses: list[dict[str, Any]] = []
@@ -202,22 +202,17 @@ class ElasticsearchAdapter:
         body: dict[str, Any] = {
             "from": (query.page - 1) * query.page_size,
             "size": size,
-            "query": {
-                "bool": {"must": must or [{"match_all": {}}], "filter": filter_clauses}
-            },
+            "query": {"bool": {"must": must or [{"match_all": {}}], "filter": filter_clauses}},
         }
         if include_aggs and query.facets:
             body["aggs"] = {
-                facet: {"terms": {"field": facet, "size": bucket_size}}
-                for facet in query.facets
+                facet: {"terms": {"field": facet, "size": bucket_size}} for facet in query.facets
             }
         return body
 
     def search(self, query: NormalizedQuery) -> dict[str, Any]:
         payload = self.translate_query(query)
-        response = self._request(
-            "POST", f"{self.base_url}/{self.index}/_search", json=payload
-        )
+        response = self._request("POST", f"{self.base_url}/{self.index}/_search", json=payload)
         try:
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
@@ -230,9 +225,7 @@ class ElasticsearchAdapter:
         return response.json()
 
     def get_record(self, record_id: str) -> dict[str, Any] | None:
-        response = self._request(
-            "GET", f"{self.base_url}/{self.index}/_doc/{record_id}"
-        )
+        response = self._request("GET", f"{self.base_url}/{self.index}/_doc/{record_id}")
         if response.status_code == 404:
             return None
         try:
@@ -260,9 +253,7 @@ class ElasticsearchAdapter:
     def get_facets(self, query: NormalizedQuery) -> dict[str, dict[str, int]]:
         """Aggregations-only search (size=0) — use for the /v1/facets endpoint."""
         payload = self.translate_query(query, size_override=0)
-        response = self._request(
-            "POST", f"{self.base_url}/{self.index}/_search", json=payload
-        )
+        response = self._request("POST", f"{self.base_url}/{self.index}/_search", json=payload)
         try:
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:

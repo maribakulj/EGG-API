@@ -82,5 +82,10 @@ def status() -> dict[str, object]:
     probe_doc = {"id": "probe", "type": "record"}
     mapping = container.mapping_health.classify(cfg.mapping, probe_doc)
     if any(v == "missing" for v in mapping.values()):
-        raise AppError("configuration_error", "Mapping has missing required/recommended sources", {"mapping": mapping}, 500)
+        raise AppError(
+            "configuration_error",
+            "Mapping has missing required/recommended sources",
+            {"mapping": mapping},
+            500,
+        )
     return {"status": "ok", "sources": container.adapter.list_sources(), "mapping": mapping}

@@ -1,4 +1,5 @@
 """Regression tests for Vague 1 security hardening (C1-C6)."""
+
 from __future__ import annotations
 
 import sqlite3
@@ -18,10 +19,10 @@ from app.runtime_paths import (
 )
 from app.storage.sqlite_store import SQLiteStore
 
-
 # ---------------------------------------------------------------------------
 # C1 — Bootstrap admin key
 # ---------------------------------------------------------------------------
+
 
 def test_c1_env_key_takes_precedence(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("EGG_BOOTSTRAP_ADMIN_KEY", "env-provided-key")
@@ -96,6 +97,7 @@ def test_c1_rejects_legacy_default_in_config(
 # C2 — Session cookie hardening
 # ---------------------------------------------------------------------------
 
+
 def test_c2_cookie_defaults_to_secure_and_strict() -> None:
     cfg = AppConfig()
     assert cfg.auth.admin_cookie_secure is True
@@ -139,6 +141,7 @@ def test_c2_secure_flag_emitted_when_enabled(client, admin_headers) -> None:
 # C3 — Never log raw API keys in usage_events
 # ---------------------------------------------------------------------------
 
+
 def test_c3_raw_api_key_never_stored_in_usage_events(client, admin_headers) -> None:
     raw_key = admin_headers["x-api-key"]
     # Trigger a request with a valid admin key.
@@ -170,6 +173,7 @@ def test_c3_invalid_key_falls_back_to_client_host(client) -> None:
 # C4 — Config YAML redaction
 # ---------------------------------------------------------------------------
 
+
 def test_c4_save_does_not_persist_bootstrap_admin_key(tmp_path: Path) -> None:
     cfg_path = tmp_path / "egg.yaml"
     manager = ConfigManager(path=cfg_path)
@@ -199,6 +203,7 @@ def test_c4_in_memory_config_keeps_the_key(tmp_path: Path) -> None:
 # C5 — UI session TTL
 # ---------------------------------------------------------------------------
 
+
 def test_c5_session_expires_after_ttl(tmp_path: Path) -> None:
     store = SQLiteStore(tmp_path / "state.sqlite3")
     store.initialize()
@@ -208,9 +213,7 @@ def test_c5_session_expires_after_ttl(tmp_path: Path) -> None:
     # Force the session to be expired.
     past = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
     with sqlite3.connect(store.db_path) as conn:
-        conn.execute(
-            "UPDATE ui_sessions SET expires_at = ? WHERE token = ?", (past, token)
-        )
+        conn.execute("UPDATE ui_sessions SET expires_at = ? WHERE token = ?", (past, token))
         conn.commit()
 
     assert store.get_ui_session_key_id(token) is None
@@ -222,16 +225,12 @@ def test_c5_expired_session_is_purged_on_read(tmp_path: Path) -> None:
     token = store.create_ui_session("admin", ttl_hours=1)
     past = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
     with sqlite3.connect(store.db_path) as conn:
-        conn.execute(
-            "UPDATE ui_sessions SET expires_at = ? WHERE token = ?", (past, token)
-        )
+        conn.execute("UPDATE ui_sessions SET expires_at = ? WHERE token = ?", (past, token))
         conn.commit()
     store.get_ui_session_key_id(token)
 
     with sqlite3.connect(store.db_path) as conn:
-        row = conn.execute(
-            "SELECT COUNT(*) FROM ui_sessions WHERE token = ?", (token,)
-        ).fetchone()
+        row = conn.execute("SELECT COUNT(*) FROM ui_sessions WHERE token = ?", (token,)).fetchone()
     assert row[0] == 0
 
 
@@ -261,6 +260,7 @@ def test_c5_migration_adds_expires_at_column(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 # C6 — Security headers
 # ---------------------------------------------------------------------------
+
 
 def test_c6_baseline_security_headers_on_public_api(client) -> None:
     response = client.get("/v1/health")

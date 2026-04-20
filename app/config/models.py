@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field, model_validator
 
-
 _VALID_CRITICALITIES = {"required", "recommended", "optional"}
 _VALID_AUTH_MODES = {"anonymous_allowed", "api_key_optional", "api_key_required"}
 _VALID_CORS_MODES = {"off", "allowlist", "wide_open"}
@@ -44,7 +43,9 @@ class RateLimitConfig(BaseModel):
 
 
 class AuthConfig(BaseModel):
-    public_mode: str = "anonymous_allowed"  # anonymous_allowed | api_key_optional | api_key_required
+    public_mode: str = (
+        "anonymous_allowed"  # anonymous_allowed | api_key_optional | api_key_required
+    )
     bootstrap_admin_key: str = ""
     admin_cookie_secure: bool = True
     admin_cookie_samesite: str = "strict"
@@ -95,9 +96,15 @@ class AppConfig(BaseModel):
     cors: CorsConfig = Field(default_factory=CorsConfig)
     cache: CacheConfig = Field(default_factory=CacheConfig)
     rate_limit: RateLimitConfig = Field(default_factory=RateLimitConfig)
-    allowed_sorts: list[str] = Field(default_factory=lambda: ["relevance", "date_desc", "date_asc", "title_asc"])
-    allowed_facets: list[str] = Field(default_factory=lambda: ["type", "language", "collection", "institution", "subject"])
-    allowed_include_fields: list[str] = Field(default_factory=lambda: ["id", "type", "title", "description", "creators"])
+    allowed_sorts: list[str] = Field(
+        default_factory=lambda: ["relevance", "date_desc", "date_asc", "title_asc"]
+    )
+    allowed_facets: list[str] = Field(
+        default_factory=lambda: ["type", "language", "collection", "institution", "subject"]
+    )
+    allowed_include_fields: list[str] = Field(
+        default_factory=lambda: ["id", "type", "title", "description", "creators"]
+    )
     mapping: dict[str, FieldMapping] = Field(
         default_factory=lambda: {
             "id": FieldMapping(source="id", mode="direct", criticality="required"),
@@ -125,8 +132,7 @@ class AppConfig(BaseModel):
         # CORS mode must be a known token.
         if self.cors.mode not in _VALID_CORS_MODES:
             raise ValueError(
-                f"cors.mode must be one of {sorted(_VALID_CORS_MODES)}; "
-                f"got {self.cors.mode!r}"
+                f"cors.mode must be one of {sorted(_VALID_CORS_MODES)}; got {self.cors.mode!r}"
             )
         # Every allowed_include_field must either be a structural field or be
         # explicitly declared in the mapping block — otherwise the API surface
@@ -135,8 +141,7 @@ class AppConfig(BaseModel):
         unmapped = [f for f in self.allowed_include_fields if f not in mapped_fields]
         if unmapped:
             raise ValueError(
-                "allowed_include_fields references fields absent from mapping: "
-                f"{unmapped}"
+                f"allowed_include_fields references fields absent from mapping: {unmapped}"
             )
         # Required/recommended mapping rules must declare a source (or sources
         # for first_non_empty, or a constant/template) — otherwise they can

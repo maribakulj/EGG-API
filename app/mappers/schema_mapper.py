@@ -10,6 +10,7 @@ Python code. Mode helpers are defensive by design: invalid dates return
 ``raw_fields`` (enabled per security profile) drops any backend-internal key
 prefixed with ``_``.
 """
+
 from __future__ import annotations
 
 import logging
@@ -85,9 +86,7 @@ def _parse_iso_date(value: Any, source_name: str | None = None) -> str | None:
     try:
         parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     except (TypeError, ValueError) as exc:
-        logger.warning(
-            "date_parser: invalid value in source=%s reason=%s", source_name, exc
-        )
+        logger.warning("date_parser: invalid value in source=%s reason=%s", source_name, exc)
         return None
     return parsed.date().isoformat()
 

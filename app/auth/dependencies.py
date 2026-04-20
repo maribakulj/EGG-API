@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import Depends, Header, Request
+from fastapi import Header, Request
 
 from app.dependencies import container
 from app.errors import AppError

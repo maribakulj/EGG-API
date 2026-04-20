@@ -8,10 +8,12 @@ exposes :meth:`compute_cache_key` (stable SHA-256 over the normalized query)
 for ETag generation, and :meth:`redact_for_logs` to strip ``q`` before the
 structured logger serializes the event.
 """
+
 from __future__ import annotations
 
 import hashlib
 import json
+from typing import ClassVar
 
 from fastapi import Request
 
@@ -21,11 +23,25 @@ from app.schemas.query import NormalizedQuery
 
 
 class QueryPolicyEngine:
-    allowed_params = {
-        "q", "page", "page_size", "sort", "facet", "include_fields", "type", "collection", "language", "institution", "date_from", "date_to", "subject", "has_digital", "has_iiif",
+    allowed_params: ClassVar[set[str]] = {
+        "q",
+        "page",
+        "page_size",
+        "sort",
+        "facet",
+        "include_fields",
+        "type",
+        "collection",
+        "language",
+        "institution",
+        "date_from",
+        "date_to",
+        "subject",
+        "has_digital",
+        "has_iiif",
     }
 
-    filter_params = {"type", "collection", "language", "institution", "subject"}
+    filter_params: ClassVar[set[str]] = {"type", "collection", "language", "institution", "subject"}
 
     def __init__(self, config: AppConfig) -> None:
         self.config = config
@@ -37,12 +53,16 @@ class QueryPolicyEngine:
     def parse(self, request: Request) -> NormalizedQuery:
         unknown = set(request.query_params.keys()) - self.allowed_params
         if unknown:
-            raise AppError("invalid_parameter", "Unknown query parameter(s)", {"unknown": sorted(unknown)})
+            raise AppError(
+                "invalid_parameter", "Unknown query parameter(s)", {"unknown": sorted(unknown)}
+            )
 
         qp = request.query_params
         q = qp.get("q")
         if not q and not self.profile.allow_empty_query:
-            raise AppError("missing_parameter", "q is required for this profile", {"parameter": "q"})
+            raise AppError(
+                "missing_parameter", "q is required for this profile", {"parameter": "q"}
+            )
 
         try:
             page = int(qp.get("page", "1"))
@@ -76,15 +96,25 @@ class QueryPolicyEngine:
 
         facets = qp.getlist("facet")
         if len(facets) > self.profile.max_facets:
-            raise AppError("invalid_parameter", "Too many facets requested", {"max_facets": self.profile.max_facets})
+            raise AppError(
+                "invalid_parameter",
+                "Too many facets requested",
+                {"max_facets": self.profile.max_facets},
+            )
         forbidden_facets = [f for f in facets if f not in self.config.allowed_facets]
         if forbidden_facets:
             raise AppError("forbidden", "Facet is not allowed", {"facets": forbidden_facets})
 
         include_fields = [x for x in qp.get("include_fields", "").split(",") if x]
-        forbidden_fields = [f for f in include_fields if f not in self.config.allowed_include_fields]
+        forbidden_fields = [
+            f for f in include_fields if f not in self.config.allowed_include_fields
+        ]
         if forbidden_fields:
-            raise AppError("forbidden", "include_fields contains forbidden fields", {"fields": forbidden_fields})
+            raise AppError(
+                "forbidden",
+                "include_fields contains forbidden fields",
+                {"fields": forbidden_fields},
+            )
 
         filters = {name: qp.getlist(name) for name in self.filter_params if qp.getlist(name)}
 

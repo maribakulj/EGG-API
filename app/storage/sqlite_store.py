@@ -103,7 +103,9 @@ class SQLiteStore:
                 """
             )
             # Idempotent migration: add expires_at on databases created before this change.
-            cols = {row["name"] for row in conn.execute("PRAGMA table_info(ui_sessions)").fetchall()}
+            cols = {
+                row["name"] for row in conn.execute("PRAGMA table_info(ui_sessions)").fetchall()
+            }
             if "expires_at" not in cols:
                 conn.execute("ALTER TABLE ui_sessions ADD COLUMN expires_at TEXT")
             # Must come AFTER the migration above: the column may not exist yet on
@@ -138,7 +140,9 @@ class SQLiteStore:
                 """,
                 (key_id, self._hash_key(secret), secret[:8], now),
             )
-        return secret, ApiKeyRecord(key_id=key_id, status="active", created_at=now, prefix=secret[:8])
+        return secret, ApiKeyRecord(
+            key_id=key_id, status="active", created_at=now, prefix=secret[:8]
+        )
 
     def list_api_keys(self) -> list[ApiKeyRecord]:
         with self._connect() as conn:
@@ -238,7 +242,9 @@ class SQLiteStore:
             )
             return default_max, default_window
 
-    def allow_subject(self, subject: str, scope: str, default_max: int, default_window: int, now_ts: int) -> bool:
+    def allow_subject(
+        self, subject: str, scope: str, default_max: int, default_window: int, now_ts: int
+    ) -> bool:
         max_requests, window_seconds = self.get_quota(scope, default_max, default_window)
         window_start = now_ts - (now_ts % window_seconds)
         now = datetime.now(timezone.utc).isoformat()
@@ -303,9 +309,7 @@ class SQLiteStore:
                 ),
             )
 
-    def list_recent_usage_events(
-        self, limit: int = 100, offset: int = 0
-    ) -> list[UsageEvent]:
+    def list_recent_usage_events(self, limit: int = 100, offset: int = 0) -> list[UsageEvent]:
         safe_limit = max(1, min(int(limit), 1000))
         safe_offset = max(0, int(offset))
         with self._connect() as conn:
@@ -328,6 +332,10 @@ class SQLiteStore:
     def usage_summary(self) -> dict[str, int]:
         with self._connect() as conn:
             total = conn.execute("SELECT COUNT(*) AS c FROM usage_events").fetchone()["c"]
-            errors = conn.execute("SELECT COUNT(*) AS c FROM usage_events WHERE status_code >= 400").fetchone()["c"]
-            keys = conn.execute("SELECT COUNT(*) AS c FROM api_keys WHERE status = 'active'").fetchone()["c"]
+            errors = conn.execute(
+                "SELECT COUNT(*) AS c FROM usage_events WHERE status_code >= 400"
+            ).fetchone()["c"]
+            keys = conn.execute(
+                "SELECT COUNT(*) AS c FROM api_keys WHERE status = 'active'"
+            ).fetchone()["c"]
         return {"events": int(total), "errors": int(errors), "active_keys": int(keys)}

@@ -14,11 +14,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.auth.api_keys import ApiKeyManager
-from app.dependencies import container
-from app.rate_limit.limiter import InMemoryRateLimiter
 from app.config.models import AppConfig
+from app.dependencies import container
 from app.mappers.schema_mapper import SchemaMapper
 from app.query_policy.engine import QueryPolicyEngine
+from app.rate_limit.limiter import InMemoryRateLimiter
 from app.schemas.query import NormalizedQuery
 from app.storage.sqlite_store import SQLiteStore
 
@@ -43,9 +43,18 @@ class FakeAdapter:
         return {
             "hits": {
                 "total": {"value": 1},
-                "hits": [{"_source": {"id": "1", "type": "object", "title": "Test title", "creator_csv": "A;B"}}],
+                "hits": [
+                    {
+                        "_source": {
+                            "id": "1",
+                            "type": "object",
+                            "title": "Test title",
+                            "creator_csv": "A;B",
+                        }
+                    }
+                ],
             },
-            "aggregations": {"type": {"buckets": [{"key": "object", "doc_count": 1}]}}
+            "aggregations": {"type": {"buckets": [{"key": "object", "doc_count": 1}]}},
         }
 
     def get_record(self, record_id: str) -> dict[str, Any] | None:

@@ -1,20 +1,19 @@
 """Regression tests for Vague 3 (H6-H8, M3-M7): API quality & validation."""
-from __future__ import annotations
 
-from typing import Any
+from __future__ import annotations
 
 import pytest
 
+from app.adapters.elasticsearch.adapter import ElasticsearchAdapter
 from app.config.models import AppConfig
 from app.dependencies import container
-from app.mappers.schema_mapper import SchemaMapper, _safe_public_url, _parse_iso_date
-from app.adapters.elasticsearch.adapter import ElasticsearchAdapter
+from app.mappers.schema_mapper import SchemaMapper, _parse_iso_date, _safe_public_url
 from app.schemas.query import NormalizedQuery
-
 
 # ---------------------------------------------------------------------------
 # H6 — Jinja2 autoescape
 # ---------------------------------------------------------------------------
+
 
 def test_h6_xss_payload_in_config_is_escaped(client, admin_headers) -> None:
     # Seed config with an attacker-supplied value, then render the page.
@@ -66,6 +65,7 @@ def test_h6_templates_env_autoescape_enabled() -> None:
 # H7 — key_id validation
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize(
     "bad_label",
     [
@@ -79,9 +79,7 @@ def test_h6_templates_env_autoescape_enabled() -> None:
         "<script>",
     ],
 )
-def test_h7_create_key_rejects_invalid_label(
-    bad_label: str, client, admin_headers
-) -> None:
+def test_h7_create_key_rejects_invalid_label(bad_label: str, client, admin_headers) -> None:
     client.post(
         "/admin/login",
         data={"api_key": admin_headers["x-api-key"]},
@@ -93,9 +91,7 @@ def test_h7_create_key_rejects_invalid_label(
 
 
 @pytest.mark.parametrize("label", ["abc", "team-01", "svc.prod", "api_key_1"])
-def test_h7_create_key_accepts_valid_labels(
-    label: str, client, admin_headers
-) -> None:
+def test_h7_create_key_accepts_valid_labels(label: str, client, admin_headers) -> None:
     client.post(
         "/admin/login",
         data={"api_key": admin_headers["x-api-key"]},
@@ -106,9 +102,7 @@ def test_h7_create_key_accepts_valid_labels(
     assert "Copy it now" in response.text
 
 
-def test_h7_status_action_rejects_invalid_path_param(
-    client, admin_headers
-) -> None:
+def test_h7_status_action_rejects_invalid_path_param(client, admin_headers) -> None:
     client.post(
         "/admin/login",
         data={"api_key": admin_headers["x-api-key"]},
@@ -126,6 +120,7 @@ def test_h7_status_action_rejects_invalid_path_param(
 # ---------------------------------------------------------------------------
 # H8 — date_parser / url_passthrough hardening
 # ---------------------------------------------------------------------------
+
 
 def test_h8_date_parser_returns_none_for_garbage() -> None:
     assert _parse_iso_date("not a date") is None
@@ -173,6 +168,7 @@ def test_h8_mapper_swallows_bad_dates() -> None:
 # M3 — max_buckets_per_facet propagated into adapter
 # ---------------------------------------------------------------------------
 
+
 def test_m3_adapter_uses_profile_bucket_cap() -> None:
     adapter = ElasticsearchAdapter("http://es.local", "records", max_buckets_per_facet=7)
     body = adapter.translate_query(NormalizedQuery(q="x", facets=["type"]))
@@ -191,6 +187,7 @@ def test_m3_explicit_override_wins_over_instance_cap() -> None:
 # ---------------------------------------------------------------------------
 # M4 — raw_fields strips internal underscore keys
 # ---------------------------------------------------------------------------
+
 
 def test_m4_raw_fields_filter_strips_internal_keys() -> None:
     cfg = AppConfig()
@@ -226,6 +223,7 @@ def test_m4_raw_fields_absent_when_profile_forbids() -> None:
 # ---------------------------------------------------------------------------
 # M7 — public endpoints carry docstrings (surfaced in OpenAPI)
 # ---------------------------------------------------------------------------
+
 
 def test_m7_public_endpoints_have_openapi_descriptions(client) -> None:
     schema = client.get("/v1/openapi.json").json()

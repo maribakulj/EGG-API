@@ -5,6 +5,7 @@ events with an ISO timestamp and the module logger name. Stdlib ``logging``
 handlers route into the same structlog renderer so third-party libraries
 (``httpx``, ``uvicorn``) get the same format.
 """
+
 from __future__ import annotations
 
 import logging
@@ -40,7 +41,7 @@ def configure(level: str | int | None = None) -> None:
     ]
 
     structlog.configure(
-        processors=shared_processors + [structlog.processors.JSONRenderer()],
+        processors=[*shared_processors, structlog.processors.JSONRenderer()],
         wrapper_class=structlog.make_filtering_bound_logger(log_level),
         context_class=dict,
         logger_factory=structlog.PrintLoggerFactory(file=sys.stderr),

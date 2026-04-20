@@ -5,9 +5,16 @@ reset it between runs; in production the default registry is fine but tests
 that instantiate the FastAPI app repeatedly would otherwise raise
 ``Duplicated timeseries`` errors from the global registry.
 """
+
 from __future__ import annotations
 
-from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, Counter, Histogram, generate_latest
+from prometheus_client import (
+    CONTENT_TYPE_LATEST,
+    CollectorRegistry,
+    Counter,
+    Histogram,
+    generate_latest,
+)
 
 # Shared registry used by both app middleware and the /metrics endpoint.
 registry = CollectorRegistry()

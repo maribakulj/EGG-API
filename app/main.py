@@ -32,7 +32,11 @@ app = FastAPI(title="EGG-API", version="0.1.0")
 app.include_router(public_router)
 app.include_router(admin_router)
 app.include_router(admin_ui_router)
-app.mount("/admin-static", StaticFiles(directory=Path(__file__).parent / "admin_ui" / "static"), name="admin-static")
+app.mount(
+    "/admin-static",
+    StaticFiles(directory=Path(__file__).parent / "admin_ui" / "static"),
+    name="admin-static",
+)
 
 
 def _configure_cors(app_instance: FastAPI) -> None:

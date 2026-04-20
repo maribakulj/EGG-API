@@ -4,7 +4,11 @@ from app.dependencies import container
 
 
 def _login(client):
-    return client.post("/admin/login", data={"api_key": container.api_keys.default_admin_key}, follow_redirects=False)
+    return client.post(
+        "/admin/login",
+        data={"api_key": container.api_keys.default_admin_key},
+        follow_redirects=False,
+    )
 
 
 def test_ui_routes_protected(client) -> None:
@@ -78,7 +82,9 @@ def test_api_key_create_and_suspend_flow(client) -> None:
     assert created.status_code == 200
     assert "Copy it now" in created.text
 
-    action = client.post("/admin/ui/keys/ui-test-key/status", data={"action": "suspend"}, follow_redirects=False)
+    action = client.post(
+        "/admin/ui/keys/ui-test-key/status", data={"action": "suspend"}, follow_redirects=False
+    )
     assert action.status_code == 303
 
     page = client.get("/admin/ui/keys")

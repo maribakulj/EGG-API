@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import logging
+import sys
+import threading
+
 from app.adapters.elasticsearch.adapter import ElasticsearchAdapter
 from app.auth.api_keys import ApiKeyManager
 from app.config.manager import ConfigManager
@@ -9,10 +13,6 @@ from app.query_policy.engine import QueryPolicyEngine
 from app.rate_limit.limiter import InMemoryRateLimiter
 from app.runtime_paths import get_state_db_path, resolve_bootstrap_admin_key
 from app.storage.sqlite_store import SQLiteStore
-
-import logging
-import sys
-import threading
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +77,9 @@ class Container:
                 timeout_seconds=config.backend.timeout_seconds,
                 max_retries=config.backend.max_retries,
                 retry_backoff_seconds=config.backend.retry_backoff_seconds,
-                max_buckets_per_facet=config.profiles[config.security_profile].max_buckets_per_facet,
+                max_buckets_per_facet=config.profiles[
+                    config.security_profile
+                ].max_buckets_per_facet,
             )
 
 

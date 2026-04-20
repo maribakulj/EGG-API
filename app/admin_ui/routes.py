@@ -5,6 +5,7 @@ All HTML rendering goes through Jinja2 templates with autoescape enabled
 fields are added to the templates, because any untrusted value is escaped
 by default. Do not build HTML via f-strings in this module.
 """
+
 from __future__ import annotations
 
 import re
@@ -15,7 +16,12 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from app.admin_ui.auth import SESSION_COOKIE, clear_ui_session, create_ui_session_for_api_key, get_ui_key_id
+from app.admin_ui.auth import (
+    SESSION_COOKIE,
+    clear_ui_session,
+    create_ui_session_for_api_key,
+    get_ui_key_id,
+)
 from app.config.models import AppConfig
 from app.dependencies import container
 from app.errors import AppError
@@ -46,9 +52,7 @@ def _render(
     **context,
 ) -> HTMLResponse:
     context.setdefault("current_key_id", get_ui_key_id(request))
-    return templates.TemplateResponse(
-        request, template, context, status_code=status_code
-    )
+    return templates.TemplateResponse(request, template, context, status_code=status_code)
 
 
 def _set_session_cookie(response, token: str) -> None:
@@ -130,7 +134,7 @@ def dashboard(request: Request):
     backend_status = "ok"
     try:
         container.adapter.health()
-    except Exception:  # noqa: BLE001
+    except Exception:
         backend_status = "unavailable"
 
     usage = container.store.usage_summary()
@@ -195,9 +199,7 @@ async def config_update(request: Request):
             raise ValueError("Unknown security profile")
 
         target_profile = cfg.profiles[cfg.security_profile]
-        target_profile.allow_empty_query = (
-            data.get("allow_empty_query", "false").lower() == "true"
-        )
+        target_profile.allow_empty_query = data.get("allow_empty_query", "false").lower() == "true"
         target_profile.page_size_default = int(data.get("page_size_default", "20"))
         target_profile.page_size_max = int(data.get("page_size_max", "50"))
         target_profile.max_depth = int(data.get("max_depth", "2000"))
@@ -208,7 +210,7 @@ async def config_update(request: Request):
 
         container.reload(AppConfig.model_validate(cfg.model_dump(mode="python")))
         return _render_config(request, message="Configuration saved successfully.")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return _render_config(
             request,
             error=f"Unable to save configuration: {exc}",
@@ -284,7 +286,7 @@ async def create_key(request: Request):
 
     try:
         created = container.api_keys.create(key_id_input)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return _render_keys(
             request,
             error=f"Unable to create API key: {exc}",

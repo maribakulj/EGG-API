@@ -4,13 +4,17 @@ import argparse
 import json
 import os
 import sys
-from pathlib import Path
 
 import uvicorn
 
 from app.config.manager import ConfigManager
 from app.config.models import AppConfig
-from app.runtime_paths import get_bootstrap_admin_key, get_config_path, get_home_dir, get_state_db_path
+from app.runtime_paths import (
+    get_bootstrap_admin_key,
+    get_config_path,
+    get_home_dir,
+    get_state_db_path,
+)
 from app.storage.sqlite_store import SQLiteStore
 
 
@@ -65,7 +69,7 @@ def cmd_check_config(_: argparse.Namespace) -> int:
         manager = ConfigManager(cfg_path, require_existing=True)
         print(f"Configuration is valid: {manager.path}")
         return 0
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         print(
             "Configuration check failed: "
             f"{exc}. Hint: run `egg-api init` to generate a baseline config.",
@@ -81,7 +85,7 @@ def cmd_check_backend(_: argparse.Namespace) -> int:
         health = container.adapter.health()
         print(json.dumps({"status": "ok", "backend": health}, indent=2))
         return 0
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         print(
             "Backend check failed: "
             f"{exc}. Verify backend.url/index in config and network reachability.",
@@ -112,7 +116,9 @@ def build_parser() -> argparse.ArgumentParser:
     check_config = sub.add_parser("check-config", help="Validate current configuration file")
     check_config.set_defaults(func=cmd_check_config)
 
-    check_backend = sub.add_parser("check-backend", help="Check backend connectivity using current config")
+    check_backend = sub.add_parser(
+        "check-backend", help="Check backend connectivity using current config"
+    )
     check_backend.set_defaults(func=cmd_check_backend)
 
     show = sub.add_parser("print-paths", help="Print effective config/state paths")

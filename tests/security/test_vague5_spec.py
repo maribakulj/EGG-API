@@ -1,4 +1,5 @@
 """Regression tests for Vague 5 (M8-M9, L3): spec drift + gap coverage."""
+
 from __future__ import annotations
 
 import pytest
@@ -11,10 +12,10 @@ from app.rate_limit.limiter import (
     InMemoryRateLimiter,
 )
 
-
 # ---------------------------------------------------------------------------
 # M8 — AppConfig cross-field validation
 # ---------------------------------------------------------------------------
+
 
 def test_m8_rejects_unknown_security_profile() -> None:
     with pytest.raises(ValueError, match="security_profile"):
@@ -27,7 +28,7 @@ def test_m8_rejects_invalid_auth_public_mode() -> None:
 
 
 def test_m8_rejects_invalid_cors_mode() -> None:
-    with pytest.raises(ValueError, match="cors.mode"):
+    with pytest.raises(ValueError, match=r"cors\.mode"):
         AppConfig.model_validate({"cors": {"mode": "on-maybe"}})
 
 
@@ -79,6 +80,7 @@ def test_m8_field_mapping_rejects_unknown_criticality() -> None:
 # M9 — Optional V1 endpoints
 # ---------------------------------------------------------------------------
 
+
 def test_m9_collections_returns_active_source(client) -> None:
     response = client.get("/v1/collections")
     assert response.status_code == 200
@@ -119,6 +121,7 @@ def test_m9_manifest_is_501_with_record_id_context(client) -> None:
 # suspended keys, rotation)
 # ---------------------------------------------------------------------------
 
+
 def test_l3_cors_preflight_rejected_when_disabled(client) -> None:
     # Default CorsConfig.mode == "off": no CORS headers should be emitted,
     # even on a cross-origin-style GET.
@@ -126,9 +129,7 @@ def test_l3_cors_preflight_rejected_when_disabled(client) -> None:
         "/v1/health",
         headers={"Origin": "https://evil.example"},
     )
-    assert "access-control-allow-origin" not in {
-        k.lower() for k in response.headers.keys()
-    }
+    assert "access-control-allow-origin" not in {k.lower() for k in response.headers.keys()}
 
 
 def test_l3_empty_hits_returns_empty_results(client) -> None:
@@ -178,9 +179,7 @@ def test_l3_suspended_key_is_denied(client) -> None:
 
     container.config_manager.config.auth.public_mode = "api_key_required"
     try:
-        response = client.get(
-            "/v1/search?q=x", headers={"x-api-key": created.key}
-        )
+        response = client.get("/v1/search?q=x", headers={"x-api-key": created.key})
         assert response.status_code == 401
     finally:
         container.config_manager.config.auth.public_mode = "anonymous_allowed"
@@ -240,6 +239,7 @@ def test_l3_unsupported_operation_surfaces_on_deep_pagination(client) -> None:
 # ---------------------------------------------------------------------------
 # L2 — Rate-limit defaults are named, not magic
 # ---------------------------------------------------------------------------
+
 
 def test_l2_rate_limiter_defaults_come_from_named_constants() -> None:
     limiter = InMemoryRateLimiter()

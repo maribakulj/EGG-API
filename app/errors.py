@@ -6,6 +6,7 @@ the HTTP ``status_code`` to emit. :func:`to_error_response` renders the
 payload in the shape specified in SPECS.md §19 and always includes the
 request id so logs and client traces can be joined.
 """
+
 from __future__ import annotations
 
 from fastapi import Request
@@ -15,7 +16,13 @@ from app.logging.request_context import get_request_id
 
 
 class AppError(Exception):
-    def __init__(self, code: str, message: str, details: dict[str, object] | None = None, status_code: int = 400) -> None:
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        details: dict[str, object] | None = None,
+        status_code: int = 400,
+    ) -> None:
         super().__init__(message)
         self.code = code
         self.message = message

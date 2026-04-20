@@ -5,6 +5,7 @@ with ``If-None-Match`` support returning ``304 Not Modified``. The TTL is driven
 by ``CacheConfig.public_max_age_seconds``; when ``CacheConfig.enabled`` is
 ``False`` the helper is a no-op.
 """
+
 from __future__ import annotations
 
 from fastapi import Request, Response

@@ -35,7 +35,7 @@ def test_page_size_enforcement() -> None:
     try:
         engine.parse(req)
         assert False
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         assert "page_size exceeds" in str(exc)
 
 
@@ -45,5 +45,5 @@ def test_sort_allowlist() -> None:
     try:
         engine.parse(req)
         assert False
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         assert "Sort is not allowed" in str(exc)
