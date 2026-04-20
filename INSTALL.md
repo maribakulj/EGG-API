@@ -9,26 +9,26 @@
 ## 2) Initialize local runtime files
 
 ```bash
-pisco-api init
+egg-api init
 ```
 
 ## 3) Validate configuration
 
 ```bash
-pisco-api check-config
+egg-api check-config
 ```
 
 ## 4) Start service
 
 ```bash
-pisco-api run --reload
+egg-api run --reload
 ```
 
 ## 5) Useful operations
 
 ```bash
-pisco-api print-paths
-pisco-api check-backend
+egg-api print-paths
+egg-api check-backend
 ```
 
 ## Admin access
@@ -43,15 +43,15 @@ pisco-api check-backend
 
 ## Runtime path variables
 
-- `PISCO_HOME`
-- `PISCO_CONFIG_PATH`
-- `PISCO_STATE_DB_PATH`
-- `PISCO_BOOTSTRAP_ADMIN_KEY`
+- `EGG_HOME`
+- `EGG_CONFIG_PATH`
+- `EGG_STATE_DB_PATH`
+- `EGG_BOOTSTRAP_ADMIN_KEY`
 
 ## Stop/restart
 
 - Stop: `Ctrl+C`
-- Restart: `pisco-api run`
+- Restart: `egg-api run`
 
 ## Constrained environments
 
@@ -61,4 +61,4 @@ If internet access is restricted, install from internal mirror/wheelhouse:
 python -m pip install --no-index --find-links /path/to/wheels -e .[dev]
 ```
 
-Then continue with `pisco-api init` and `pisco-api run`.
+Then continue with `egg-api init` and `egg-api run`.

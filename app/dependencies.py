@@ -30,8 +30,8 @@ class Container:
         if generated:
             # Emit once to stderr so the operator can capture the one-time secret.
             sys.stderr.write(
-                "[PISCO-API] Generated a bootstrap admin key (saved to the sidecar file). "
-                "Set PISCO_BOOTSTRAP_ADMIN_KEY to pin it across restarts.\n"
+                "[EGG-API] Generated a bootstrap admin key (saved to the sidecar file). "
+                "Set EGG_BOOTSTRAP_ADMIN_KEY to pin it across restarts.\n"
             )
         self.api_keys = ApiKeyManager(self.store, bootstrap_key)
         self.rate_limiter = InMemoryRateLimiter(

@@ -7,7 +7,7 @@ backend:
   retry_backoff_seconds: 0.2
 
 storage:
-  sqlite_path: data/pisco_state.sqlite3
+  sqlite_path: data/egg_state.sqlite3
 
 security_profile: prudent
 profiles:
@@ -33,7 +33,7 @@ profiles:
 auth:
   public_mode: anonymous_allowed  # anonymous_allowed | api_key_optional | api_key_required
   # bootstrap_admin_key: intentionally NOT set here — provide it via
-  # PISCO_BOOTSTRAP_ADMIN_KEY or let the service generate a one-time
+  # EGG_BOOTSTRAP_ADMIN_KEY or let the service generate a one-time
   # key on first start (see data/bootstrap_admin.key). The value is
   # stripped from the YAML on every save() to avoid secret leakage.
   admin_cookie_secure: true

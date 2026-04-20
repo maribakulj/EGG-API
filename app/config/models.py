@@ -59,7 +59,7 @@ class CorsConfig(BaseModel):
 
 
 class StorageConfig(BaseModel):
-    sqlite_path: str = "data/pisco_state.sqlite3"
+    sqlite_path: str = "data/egg_state.sqlite3"
 
 
 class FieldMapping(BaseModel):

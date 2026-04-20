@@ -24,14 +24,14 @@ from app.storage.sqlite_store import SQLiteStore
 # ---------------------------------------------------------------------------
 
 def test_c1_env_key_takes_precedence(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("PISCO_BOOTSTRAP_ADMIN_KEY", "env-provided-key")
+    monkeypatch.setenv("EGG_BOOTSTRAP_ADMIN_KEY", "env-provided-key")
     key, generated = resolve_bootstrap_admin_key("config-key")
     assert key == "env-provided-key"
     assert generated is False
 
 
 def test_c1_rejects_legacy_insecure_env_value(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("PISCO_BOOTSTRAP_ADMIN_KEY", LEGACY_INSECURE_BOOTSTRAP_KEY)
+    monkeypatch.setenv("EGG_BOOTSTRAP_ADMIN_KEY", LEGACY_INSECURE_BOOTSTRAP_KEY)
     with pytest.raises(RuntimeError, match="insecure default"):
         resolve_bootstrap_admin_key("")
 
@@ -39,10 +39,10 @@ def test_c1_rejects_legacy_insecure_env_value(monkeypatch: pytest.MonkeyPatch) -
 def test_c1_refuses_start_in_production_without_key(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.delenv("PISCO_BOOTSTRAP_ADMIN_KEY", raising=False)
-    monkeypatch.setenv("PISCO_ENV", "production")
-    monkeypatch.setenv("PISCO_HOME", str(tmp_path))
-    monkeypatch.setenv("PISCO_BOOTSTRAP_KEY_PATH", str(tmp_path / "no-sidecar.key"))
+    monkeypatch.delenv("EGG_BOOTSTRAP_ADMIN_KEY", raising=False)
+    monkeypatch.setenv("EGG_ENV", "production")
+    monkeypatch.setenv("EGG_HOME", str(tmp_path))
+    monkeypatch.setenv("EGG_BOOTSTRAP_KEY_PATH", str(tmp_path / "no-sidecar.key"))
     with pytest.raises(RuntimeError, match="production"):
         resolve_bootstrap_admin_key("")
 
@@ -51,9 +51,9 @@ def test_c1_generates_and_persists_in_development(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     sidecar = tmp_path / "bootstrap_admin.key"
-    monkeypatch.delenv("PISCO_BOOTSTRAP_ADMIN_KEY", raising=False)
-    monkeypatch.setenv("PISCO_ENV", "development")
-    monkeypatch.setenv("PISCO_BOOTSTRAP_KEY_PATH", str(sidecar))
+    monkeypatch.delenv("EGG_BOOTSTRAP_ADMIN_KEY", raising=False)
+    monkeypatch.setenv("EGG_ENV", "development")
+    monkeypatch.setenv("EGG_BOOTSTRAP_KEY_PATH", str(sidecar))
 
     key1, generated1 = resolve_bootstrap_admin_key("")
     assert generated1 is True
@@ -70,9 +70,9 @@ def test_c1_sidecar_file_has_owner_only_perms(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     sidecar = tmp_path / "bootstrap_admin.key"
-    monkeypatch.delenv("PISCO_BOOTSTRAP_ADMIN_KEY", raising=False)
-    monkeypatch.setenv("PISCO_ENV", "development")
-    monkeypatch.setenv("PISCO_BOOTSTRAP_KEY_PATH", str(sidecar))
+    monkeypatch.delenv("EGG_BOOTSTRAP_ADMIN_KEY", raising=False)
+    monkeypatch.setenv("EGG_ENV", "development")
+    monkeypatch.setenv("EGG_BOOTSTRAP_KEY_PATH", str(sidecar))
 
     resolve_bootstrap_admin_key("")
     mode = sidecar.stat().st_mode & 0o777
@@ -83,9 +83,9 @@ def test_c1_rejects_legacy_default_in_config(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     sidecar = tmp_path / "bootstrap_admin.key"
-    monkeypatch.delenv("PISCO_BOOTSTRAP_ADMIN_KEY", raising=False)
-    monkeypatch.setenv("PISCO_ENV", "development")
-    monkeypatch.setenv("PISCO_BOOTSTRAP_KEY_PATH", str(sidecar))
+    monkeypatch.delenv("EGG_BOOTSTRAP_ADMIN_KEY", raising=False)
+    monkeypatch.setenv("EGG_ENV", "development")
+    monkeypatch.setenv("EGG_BOOTSTRAP_KEY_PATH", str(sidecar))
 
     key, generated = resolve_bootstrap_admin_key(LEGACY_INSECURE_BOOTSTRAP_KEY)
     assert generated is True
@@ -171,7 +171,7 @@ def test_c3_invalid_key_falls_back_to_client_host(client) -> None:
 # ---------------------------------------------------------------------------
 
 def test_c4_save_does_not_persist_bootstrap_admin_key(tmp_path: Path) -> None:
-    cfg_path = tmp_path / "pisco.yaml"
+    cfg_path = tmp_path / "egg.yaml"
     manager = ConfigManager(path=cfg_path)
 
     cfg = AppConfig()
@@ -186,7 +186,7 @@ def test_c4_save_does_not_persist_bootstrap_admin_key(tmp_path: Path) -> None:
 
 
 def test_c4_in_memory_config_keeps_the_key(tmp_path: Path) -> None:
-    cfg_path = tmp_path / "pisco.yaml"
+    cfg_path = tmp_path / "egg.yaml"
     manager = ConfigManager(path=cfg_path)
     cfg = AppConfig()
     cfg.auth.bootstrap_admin_key = "keep-me-in-memory"
@@ -282,7 +282,7 @@ def test_c6_admin_routes_block_framing_and_set_csp(client, admin_headers) -> Non
 
 
 def test_c6_hsts_enabled_in_production(monkeypatch: pytest.MonkeyPatch, client) -> None:
-    monkeypatch.setenv("PISCO_ENV", "production")
+    monkeypatch.setenv("EGG_ENV", "production")
     response = client.get("/v1/health")
     assert "max-age=" in response.headers.get("Strict-Transport-Security", "")
 

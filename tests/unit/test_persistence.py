@@ -58,7 +58,7 @@ def test_storage_bootstrap_creates_sqlite_file(tmp_path: Path) -> None:
 def test_config_manager_path_from_env(tmp_path: Path, monkeypatch) -> None:
     cfg = tmp_path / "custom.yaml"
     cfg.write_text("backend:\n  type: elasticsearch\n")
-    monkeypatch.setenv("PISCO_CONFIG_PATH", str(cfg))
+    monkeypatch.setenv("EGG_CONFIG_PATH", str(cfg))
 
     manager = ConfigManager()
     assert manager.path == cfg

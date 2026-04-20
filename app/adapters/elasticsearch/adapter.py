@@ -20,7 +20,7 @@ from app.logging import get_logger
 from app.metrics import backend_errors
 from app.schemas.query import NormalizedQuery
 
-logger = get_logger("pisco.adapter.es")
+logger = get_logger("egg.adapter.es")
 
 
 def _record_backend_error(error_code: str) -> None:

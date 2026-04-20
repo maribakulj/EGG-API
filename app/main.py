@@ -26,9 +26,9 @@ from app.public_api.routes import router as public_router
 from app.runtime_paths import is_production
 
 configure_logging()
-logger = structlog.get_logger("pisco.http")
+logger = structlog.get_logger("egg.http")
 
-app = FastAPI(title="PISCO-API", version="0.1.0")
+app = FastAPI(title="EGG-API", version="0.1.0")
 app.include_router(public_router)
 app.include_router(admin_router)
 app.include_router(admin_ui_router)

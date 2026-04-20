@@ -23,7 +23,7 @@ def configure(level: str | int | None = None) -> None:
         return
 
     log_level_name = (
-        level if isinstance(level, str) and level else os.getenv("PISCO_LOG_LEVEL", "INFO")
+        level if isinstance(level, str) and level else os.getenv("EGG_LOG_LEVEL", "INFO")
     )
     log_level = (
         log_level_name

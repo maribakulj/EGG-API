@@ -1,8 +1,8 @@
-# Spécification technique complète — PISCO API
+# Spécification technique complète — EGG API
 
 ## 1. Objet du document
 
-Ce document définit la spécification précise d’un logiciel nommé **PISCO API**, dont le but est de publier rapidement une **API patrimoniale standardisée** au-dessus d’un backend documentaire ou de recherche existant, sans réécriture du système source.
+Ce document définit la spécification précise d’un logiciel nommé **EGG API**, dont le but est de publier rapidement une **API patrimoniale standardisée** au-dessus d’un backend documentaire ou de recherche existant, sans réécriture du système source.
 
 Le document est écrit pour pouvoir servir directement de base de génération de code par un LLM ou de travail pour une équipe de développement.
 
@@ -49,7 +49,7 @@ Le **backend** est le système réellement interrogé : Elasticsearch, OpenSearc
 
 ### 3.3 Adapter
 
-Un **adapter** est un module logiciel qui traduit les requêtes de la PISCO API en requêtes natives du backend.
+Un **adapter** est un module logiciel qui traduit les requêtes de la EGG API en requêtes natives du backend.
 
 ### 3.4 Public API
 
@@ -146,7 +146,7 @@ Moteur qui teste des signatures de backend et valide la connectivité.
 
 ### 7.3 Adapter Layer
 
-Couche de traduction entre la PISCO API et les backends.
+Couche de traduction entre la EGG API et les backends.
 
 ### 7.4 Schema Mapper
 
@@ -536,7 +536,7 @@ Retourner un état synthétique du service.
 ```json
 {
   "status": "ok|degraded|error",
-  "service": "pisco-api",
+  "service": "egg-api",
   "version": "1.0.0",
   "backend": {
     "engine": "elasticsearch",
@@ -797,7 +797,7 @@ Le produit doit persister une configuration déclarative.
 
 ```yaml
 project:
-  name: pisco-public-api
+  name: egg-public-api
   api_version: v1
 
 backend:

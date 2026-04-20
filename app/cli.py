@@ -35,7 +35,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     store.ensure_admin_key(bootstrap_key)
 
     print(f"Initialized state DB: {db_path}")
-    print("Bootstrap complete. Next: pisco-api run --reload")
+    print("Bootstrap complete. Next: egg-api run --reload")
     return 0
 
 
@@ -51,8 +51,8 @@ def cmd_print_paths(_: argparse.Namespace) -> int:
         "config_path": str(cfg_path),
         "config_exists": cfg_exists,
         "state_db_path": str(get_state_db_path(cfg.storage.sqlite_path)),
-        "bootstrap_admin_key_source": "env:PISCO_BOOTSTRAP_ADMIN_KEY"
-        if "PISCO_BOOTSTRAP_ADMIN_KEY" in os.environ
+        "bootstrap_admin_key_source": "env:EGG_BOOTSTRAP_ADMIN_KEY"
+        if "EGG_BOOTSTRAP_ADMIN_KEY" in os.environ
         else "config.auth.bootstrap_admin_key",
     }
     print(json.dumps(output, indent=2))
@@ -68,7 +68,7 @@ def cmd_check_config(_: argparse.Namespace) -> int:
     except Exception as exc:  # noqa: BLE001
         print(
             "Configuration check failed: "
-            f"{exc}. Hint: run `pisco-api init` to generate a baseline config.",
+            f"{exc}. Hint: run `egg-api init` to generate a baseline config.",
             file=sys.stderr,
         )
         return 2
@@ -96,7 +96,7 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="pisco-api", description="PISCO-API operator CLI")
+    parser = argparse.ArgumentParser(prog="egg-api", description="EGG-API operator CLI")
     sub = parser.add_subparsers(dest="command", required=True)
 
     init = sub.add_parser("init", help="Create default config/state files and initialize storage")
