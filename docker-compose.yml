@@ -1,0 +1,42 @@
+services:
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.0
+    container_name: egg-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    ports:
+      - "9200:9200"
+    volumes:
+      - es-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health | grep -q '\"status\":\"green\"\\|\"status\":\"yellow\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  egg-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: egg-api:local
+    container_name: egg-api
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    environment:
+      - EGG_ENV=development
+      - EGG_HOME=/var/lib/egg
+      - EGG_CONFIG_PATH=/var/lib/egg/config/egg.yaml
+      - EGG_BOOTSTRAP_ADMIN_KEY=dev-admin-key-change-me-in-prod-0000
+      - EGG_LOG_LEVEL=INFO
+    ports:
+      - "8000:8000"
+    volumes:
+      - egg-state:/var/lib/egg/data
+      - ./examples/config.docker.yaml:/var/lib/egg/config/egg.yaml:ro
+
+volumes:
+  es-data:
+  egg-state:

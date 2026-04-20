@@ -32,7 +32,7 @@ Expose a safe, normalized, backend-agnostic public API on top of an existing GLA
 - No deep pagination workaround in v1
 
 ## Coding style
-- Python 3.12
+- Python 3.10+
 - FastAPI
 - Pydantic v2
 - pytest
