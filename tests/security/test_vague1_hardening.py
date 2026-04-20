@@ -210,10 +210,12 @@ def test_c5_session_expires_after_ttl(tmp_path: Path) -> None:
     token = store.create_ui_session("admin", ttl_hours=1)
     assert store.get_ui_session_key_id(token) == "admin"
 
-    # Force the session to be expired.
+    # Force the session to be expired. Session rows are keyed by the hash
+    # of the cookie value, not the raw token — hash before the UPDATE.
+    token_hash = SQLiteStore._hash_session_token(token)
     past = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
     with sqlite3.connect(store.db_path) as conn:
-        conn.execute("UPDATE ui_sessions SET expires_at = ? WHERE token = ?", (past, token))
+        conn.execute("UPDATE ui_sessions SET expires_at = ? WHERE token = ?", (past, token_hash))
         conn.commit()
 
     assert store.get_ui_session_key_id(token) is None
@@ -223,15 +225,31 @@ def test_c5_expired_session_is_purged_on_read(tmp_path: Path) -> None:
     store = SQLiteStore(tmp_path / "state.sqlite3")
     store.initialize()
     token = store.create_ui_session("admin", ttl_hours=1)
+    token_hash = SQLiteStore._hash_session_token(token)
     past = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
     with sqlite3.connect(store.db_path) as conn:
-        conn.execute("UPDATE ui_sessions SET expires_at = ? WHERE token = ?", (past, token))
+        conn.execute("UPDATE ui_sessions SET expires_at = ? WHERE token = ?", (past, token_hash))
         conn.commit()
     store.get_ui_session_key_id(token)
 
     with sqlite3.connect(store.db_path) as conn:
-        row = conn.execute("SELECT COUNT(*) FROM ui_sessions WHERE token = ?", (token,)).fetchone()
+        row = conn.execute(
+            "SELECT COUNT(*) FROM ui_sessions WHERE token = ?", (token_hash,)
+        ).fetchone()
     assert row[0] == 0
+
+
+def test_c5_raw_session_cookie_is_never_stored(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "state.sqlite3")
+    store.initialize()
+    token = store.create_ui_session("admin", ttl_hours=1)
+
+    # The raw cookie value must never appear in the DB — only its hash does.
+    with sqlite3.connect(store.db_path) as conn:
+        row = conn.execute("SELECT token FROM ui_sessions").fetchone()
+    assert row is not None
+    assert row[0] != token
+    assert row[0] == SQLiteStore._hash_session_token(token)
 
 
 def test_c5_migration_adds_expires_at_column(tmp_path: Path) -> None:

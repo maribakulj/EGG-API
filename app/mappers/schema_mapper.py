@@ -20,6 +20,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from app.config.models import AppConfig
+from app.errors import AppError
 from app.schemas.record import Record
 
 logger = logging.getLogger(__name__)
@@ -43,8 +44,22 @@ class SchemaMapper:
         for public_field, rule in self.config.mapping.items():
             mapped[public_field] = self._apply_mode(rule.mode, rule.model_dump(), doc)
 
-        mapped.setdefault("id", str(doc.get("id") or doc.get("_id") or ""))
-        mapped.setdefault("type", str(doc.get("type") or "record"))
+        # `setdefault` does NOT overwrite an explicit None that a mapping rule
+        # produced when the configured source was absent. Guard both structural
+        # fields explicitly: missing id/type from the backend is an upstream
+        # data issue, not an EGG config bug -> raise 502 instead of a Pydantic
+        # 500 later.
+        if not mapped.get("id"):
+            mapped["id"] = str(doc.get("id") or doc.get("_id") or "")
+        if not mapped.get("type"):
+            mapped["type"] = str(doc.get("type") or "record")
+        if not mapped["id"]:
+            raise AppError(
+                "bad_gateway",
+                "Backend record is missing a usable identifier",
+                {"hint": "id / _id fields were empty or absent"},
+                status_code=502,
+            )
         if self.config.profiles[self.config.security_profile].allow_raw_fields:
             mapped["raw_fields"] = _filter_internal_fields(doc)
         return Record.model_validate(mapped)

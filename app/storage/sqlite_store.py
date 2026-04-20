@@ -113,6 +113,22 @@ class SQLiteStore:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_ui_sessions_expires ON ui_sessions(expires_at)"
             )
+            # Idempotent migration: the `token` column now stores the SHA-256
+            # hash of the session cookie value, not the raw token. A schema
+            # marker row in `quota_config` tracks whether this migration has
+            # run; if not, we purge existing rows (they hold raw tokens that
+            # the hashed lookup can never match — users re-authenticate).
+            migrated = conn.execute(
+                "SELECT 1 FROM quota_config WHERE scope = ?", ("_schema:ui_sessions_v2",)
+            ).fetchone()
+            if migrated is None:
+                conn.execute("DELETE FROM ui_sessions")
+                now_iso = datetime.now(timezone.utc).isoformat()
+                conn.execute(
+                    "INSERT OR IGNORE INTO quota_config(scope, max_requests, window_seconds, updated_at) "
+                    "VALUES (?, 0, 0, ?)",
+                    ("_schema:ui_sessions_v2", now_iso),
+                )
 
     @staticmethod
     def _hash_key(key: str) -> str:
@@ -185,38 +201,46 @@ class SQLiteStore:
             )
             return record
 
+    @staticmethod
+    def _hash_session_token(token: str) -> str:
+        # Same primitive as _hash_key; DB rows never store the raw cookie.
+        return hashlib.sha256(token.encode()).hexdigest()
+
     def create_ui_session(self, key_id: str, ttl_hours: int = 12) -> str:
         token = secrets.token_urlsafe(32)
+        token_hash = self._hash_session_token(token)
         now = datetime.now(timezone.utc)
         expires_at = (now + timedelta(hours=max(1, int(ttl_hours)))).isoformat()
         with self._connect() as conn:
             conn.execute(
                 "INSERT INTO ui_sessions(token, key_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
-                (token, key_id, now.isoformat(), expires_at),
+                (token_hash, key_id, now.isoformat(), expires_at),
             )
         return token
 
     def get_ui_session_key_id(self, token: str | None) -> str | None:
         if not token:
             return None
+        token_hash = self._hash_session_token(token)
         now_iso = datetime.now(timezone.utc).isoformat()
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT key_id, expires_at FROM ui_sessions WHERE token = ?", (token,)
+                "SELECT key_id, expires_at FROM ui_sessions WHERE token = ?", (token_hash,)
             ).fetchone()
             if not row:
                 return None
             expires_at = row["expires_at"]
             if expires_at is not None and expires_at <= now_iso:
-                conn.execute("DELETE FROM ui_sessions WHERE token = ?", (token,))
+                conn.execute("DELETE FROM ui_sessions WHERE token = ?", (token_hash,))
                 return None
         return str(row["key_id"])
 
     def delete_ui_session(self, token: str | None) -> None:
         if not token:
             return
+        token_hash = self._hash_session_token(token)
         with self._connect() as conn:
-            conn.execute("DELETE FROM ui_sessions WHERE token = ?", (token,))
+            conn.execute("DELETE FROM ui_sessions WHERE token = ?", (token_hash,))
 
     def purge_expired_ui_sessions(self) -> int:
         now_iso = datetime.now(timezone.utc).isoformat()

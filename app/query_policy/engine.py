@@ -43,6 +43,13 @@ class QueryPolicyEngine:
 
     filter_params: ClassVar[set[str]] = {"type", "collection", "language", "institution", "subject"}
 
+    # Hard caps protecting the backend from oversized inputs, independent of
+    # the per-profile policy knobs.
+    MAX_Q_LENGTH: ClassVar[int] = 512
+    MAX_FILTER_VALUES: ClassVar[int] = 50
+    MAX_FILTER_VALUE_LENGTH: ClassVar[int] = 256
+    MAX_INCLUDE_FIELDS: ClassVar[int] = 20
+
     def __init__(self, config: AppConfig) -> None:
         self.config = config
 
@@ -62,6 +69,12 @@ class QueryPolicyEngine:
         if not q and not self.profile.allow_empty_query:
             raise AppError(
                 "missing_parameter", "q is required for this profile", {"parameter": "q"}
+            )
+        if q is not None and len(q) > self.MAX_Q_LENGTH:
+            raise AppError(
+                "invalid_parameter",
+                "q is too long",
+                {"max_length": self.MAX_Q_LENGTH, "actual_length": len(q)},
             )
 
         try:
@@ -106,6 +119,12 @@ class QueryPolicyEngine:
             raise AppError("forbidden", "Facet is not allowed", {"facets": forbidden_facets})
 
         include_fields = [x for x in qp.get("include_fields", "").split(",") if x]
+        if len(include_fields) > self.MAX_INCLUDE_FIELDS:
+            raise AppError(
+                "invalid_parameter",
+                "Too many include_fields",
+                {"max": self.MAX_INCLUDE_FIELDS, "requested": len(include_fields)},
+            )
         forbidden_fields = [
             f for f in include_fields if f not in self.config.allowed_include_fields
         ]
@@ -116,7 +135,32 @@ class QueryPolicyEngine:
                 {"fields": forbidden_fields},
             )
 
-        filters = {name: qp.getlist(name) for name in self.filter_params if qp.getlist(name)}
+        filters: dict[str, list[str]] = {}
+        for name in self.filter_params:
+            values = qp.getlist(name)
+            if not values:
+                continue
+            if len(values) > self.MAX_FILTER_VALUES:
+                raise AppError(
+                    "invalid_parameter",
+                    "Too many values for filter",
+                    {
+                        "filter": name,
+                        "max": self.MAX_FILTER_VALUES,
+                        "requested": len(values),
+                    },
+                )
+            oversized = [v for v in values if len(v) > self.MAX_FILTER_VALUE_LENGTH]
+            if oversized:
+                raise AppError(
+                    "invalid_parameter",
+                    "Filter value too long",
+                    {
+                        "filter": name,
+                        "max_length": self.MAX_FILTER_VALUE_LENGTH,
+                    },
+                )
+            filters[name] = values
 
         return NormalizedQuery(
             q=q,

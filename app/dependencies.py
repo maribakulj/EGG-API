@@ -71,6 +71,7 @@ class Container:
             )
             self.mapper = SchemaMapper(config)
             self.policy = QueryPolicyEngine(config)
+            previous_adapter = self.adapter
             self.adapter = ElasticsearchAdapter(
                 config.backend.url,
                 config.backend.index,
@@ -81,6 +82,14 @@ class Container:
                     config.security_profile
                 ].max_buckets_per_facet,
             )
+            # Release the old httpx client + its connection pool. If a handler
+            # was still holding a reference it keeps working until it drops it,
+            # but we stop leaking sockets/FDs across reloads.
+            if previous_adapter is not None:
+                try:
+                    previous_adapter.client.close()
+                except Exception:
+                    logger.exception("previous_adapter_close_failed")
 
 
 container = Container()

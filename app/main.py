@@ -28,7 +28,18 @@ from app.runtime_paths import is_production
 configure_logging()
 logger = structlog.get_logger("egg.http")
 
-app = FastAPI(title="EGG-API", version="0.1.0")
+# Hide the interactive explorers in production: they list every route
+# (including admin endpoints) and let anonymous callers fingerprint the
+# surface. The custom /v1/openapi.json stays on in every environment for
+# programmatic clients.
+_PROD = is_production()
+app = FastAPI(
+    title="EGG-API",
+    version="0.1.0",
+    docs_url=None if _PROD else "/docs",
+    redoc_url=None if _PROD else "/redoc",
+    openapi_url=None if _PROD else "/openapi.json",
+)
 app.include_router(public_router)
 app.include_router(admin_router)
 app.include_router(admin_ui_router)
@@ -84,6 +95,17 @@ async def security_headers_middleware(request: Request, call_next):
     return response
 
 
+def _route_template(request: Request, fallback: str) -> str:
+    """Return the path template of the matched route (e.g. ``/v1/records/{id}``).
+
+    Using ``request.url.path`` as a Prometheus label value would explode the
+    time-series cardinality whenever a path parameter is present.
+    """
+    route = request.scope.get("route")
+    path = getattr(route, "path", None) if route is not None else None
+    return path or fallback
+
+
 @app.middleware("http")
 async def usage_audit_middleware(request: Request, call_next):
     started = time.monotonic()
@@ -94,58 +116,104 @@ async def usage_audit_middleware(request: Request, call_next):
         method=request.method,
         path=request.url.path,
     )
-    response = await call_next(request)
 
-    # Never log the raw API key. Resolve it to the key_id (public label);
-    # fall back to the client IP for anonymous or invalid-key traffic.
-    raw_key = request.headers.get("x-api-key")
-    resolved_key_id: str | None = None
-    if raw_key:
-        identity = container.api_keys.get_identity(raw_key)
-        if identity is not None:
-            resolved_key_id = identity.key_id
+    response = None
+    status_code = 500
+    error_code: str | None = "unhandled_exception"
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        error_code = None
+        return response
+    finally:
+        # Never log the raw API key. Resolve it to the key_id (public label);
+        # fall back to the client IP for anonymous or invalid-key traffic.
+        raw_key = request.headers.get("x-api-key")
+        resolved_key_id: str | None = None
+        if raw_key:
+            identity = container.api_keys.get_identity(raw_key)
+            if identity is not None:
+                resolved_key_id = identity.key_id
 
-    client_host = request.client.host if request.client else "anonymous"
-    subject = resolved_key_id or client_host
-    duration_s = time.monotonic() - started
-    latency_ms = int(duration_s * 1000)
-    endpoint = request.url.path
-    status = str(response.status_code)
+        client_host = request.client.host if request.client else "anonymous"
+        subject = resolved_key_id or client_host
+        duration_s = time.monotonic() - started
+        latency_ms = int(duration_s * 1000)
+        raw_path = request.url.path
+        endpoint = _route_template(request, fallback=raw_path)
+        status_label = str(status_code)
 
-    # Prometheus counters & histogram.
-    request_count.labels(endpoint=endpoint, method=request.method, status=status).inc()
-    request_duration.labels(endpoint=endpoint, method=request.method).observe(duration_s)
-    if response.status_code == 429:
-        scope = "public" if endpoint.startswith("/v1") else "admin"
-        rate_limit_hits.labels(scope=scope).inc()
+        # Prometheus counters & histogram — labels use the route template to
+        # keep cardinality bounded.
+        request_count.labels(endpoint=endpoint, method=request.method, status=status_label).inc()
+        request_duration.labels(endpoint=endpoint, method=request.method).observe(duration_s)
+        if status_code == 429:
+            scope = "public" if endpoint.startswith("/v1") else "admin"
+            rate_limit_hits.labels(scope=scope).inc()
 
-    logger.info(
-        "request",
-        request_id=request_id,
-        method=request.method,
-        path=endpoint,
-        status_code=response.status_code,
-        latency_ms=latency_ms,
-        key_id=resolved_key_id,
-    )
+        logger.info(
+            "request",
+            request_id=request_id,
+            method=request.method,
+            path=raw_path,
+            route=endpoint,
+            status_code=status_code,
+            latency_ms=latency_ms,
+            key_id=resolved_key_id,
+            error_code=error_code,
+        )
 
-    container.store.log_usage_event(
-        request_id=request_id,
-        endpoint=endpoint,
-        method=request.method,
-        status_code=response.status_code,
-        api_key_id=resolved_key_id,
-        subject=str(subject),
-        latency_ms=latency_ms,
-        error_code=None,
-    )
-    structlog.contextvars.clear_contextvars()
-    return response
+        try:
+            container.store.log_usage_event(
+                request_id=request_id,
+                endpoint=endpoint,
+                method=request.method,
+                status_code=status_code,
+                api_key_id=resolved_key_id,
+                subject=str(subject),
+                latency_ms=latency_ms,
+                error_code=error_code,
+            )
+        except Exception:
+            # Storage failure must not hide the original response/exception.
+            logger.exception("usage_event_persist_failed", request_id=request_id)
+
+        structlog.contextvars.clear_contextvars()
 
 
 @app.get("/metrics")
-def metrics() -> Response:
-    """Expose Prometheus metrics in text exposition format."""
+def metrics(request: Request) -> Response:
+    """Expose Prometheus metrics in text exposition format.
+
+    Protected: the caller must present either the admin API key (via
+    ``X-API-Key``) or a bearer token equal to ``EGG_METRICS_TOKEN``. In
+    development both checks are skipped when ``EGG_METRICS_TOKEN`` is unset
+    and no admin key is provided, to preserve the local developer ergonomics.
+    Set the env var in production to require authenticated scraping.
+    """
+    import os
+
+    expected_token = os.getenv("EGG_METRICS_TOKEN", "").strip()
+    auth_header = request.headers.get("authorization", "")
+    bearer = ""
+    if auth_header.lower().startswith("bearer "):
+        bearer = auth_header.split(" ", 1)[1].strip()
+    x_api_key = request.headers.get("x-api-key")
+
+    if expected_token and bearer != expected_token and not container.api_keys.validate(x_api_key):
+        raise AppError(
+            "invalid_api_key",
+            "/metrics requires a bearer token or admin API key",
+            status_code=401,
+        )
+    # Refuse unauthenticated scraping in prod when no token is configured.
+    if not expected_token and is_production() and not container.api_keys.validate(x_api_key):
+        raise AppError(
+            "invalid_api_key",
+            "/metrics is not exposed without EGG_METRICS_TOKEN in production",
+            status_code=401,
+        )
+
     body, content_type = render_latest()
     return Response(content=body, media_type=content_type)
 

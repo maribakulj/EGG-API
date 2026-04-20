@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request, Response
 
-from app.auth.dependencies import enforce_public_auth
+from app.auth.dependencies import enforce_public_auth, require_admin_key
 from app.dependencies import container
 from app.errors import AppError
 from app.http_cache import apply_cache_headers
@@ -11,10 +11,35 @@ from app.schemas.record import Record, SearchResponse
 router = APIRouter(prefix="/v1", tags=["public"])
 
 
-@router.get("/health")
-def health() -> dict[str, object]:
-    """Liveness + backend health probe."""
+@router.get("/livez")
+def livez() -> dict[str, str]:
+    """Liveness probe: does the process respond?
+
+    Minimal by design — returns a constant body. Safe to expose publicly;
+    no internal state leaks.
+    """
+    return {"status": "ok"}
+
+
+@router.get("/readyz")
+def readyz(_: str = Depends(require_admin_key)) -> dict[str, object]:
+    """Readiness probe: can the service serve traffic?
+
+    Admin-authenticated because it proxies the backend's internal cluster
+    health — an operator wants detail; an anonymous caller must not fingerprint
+    the upstream state (green/yellow/red, shard counts, cluster name).
+    """
     return {"status": "ok", "backend": container.adapter.health()}
+
+
+@router.get("/health", deprecated=True)
+def health() -> dict[str, str]:
+    """Deprecated — prefer ``/v1/livez`` (public) and ``/v1/readyz`` (admin).
+
+    Retained as a minimal alias for backwards compatibility. Returns only the
+    liveness payload; backend state is available via ``/v1/readyz``.
+    """
+    return {"status": "ok"}
 
 
 @router.get("/search", response_model=SearchResponse, response_model_exclude_none=False)
@@ -64,10 +89,10 @@ def get_record(
     raw = container.adapter.get_record(record_id)
     if raw is None:
         raise AppError("not_found", "Record not found", status_code=404)
-    record = container.mapper.map_record(raw)
-    if not record.id or not record.type:
-        raise AppError("configuration_error", "Required structural fields missing", status_code=500)
-    return record
+    # map_record raises AppError("bad_gateway", 502) if the backend record
+    # is missing a usable id; that surfaces as the right status without this
+    # extra guard.
+    return container.mapper.map_record(raw)
 
 
 @router.get("/facets")

@@ -213,12 +213,15 @@ def test_l3_session_expiry_forces_redirect_to_login(client, admin_headers) -> No
         token = client.cookies.get("egg_admin_session")
     assert token, "expected a session cookie"
 
-    # Force the session expired.
+    # Force the session expired. Row key is the hash of the cookie value.
+    from app.storage.sqlite_store import SQLiteStore
+
+    token_hash = SQLiteStore._hash_session_token(token)
     past = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
     with sqlite3.connect(container.store.db_path) as conn:
         conn.execute(
             "UPDATE ui_sessions SET expires_at = ? WHERE token = ?",
-            (past, token),
+            (past, token_hash),
         )
         conn.commit()
 
