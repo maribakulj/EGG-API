@@ -8,10 +8,12 @@ exposes :meth:`compute_cache_key` (stable SHA-256 over the normalized query)
 for ETag generation, and :meth:`redact_for_logs` to strip ``q`` before the
 structured logger serializes the event.
 """
+
 from __future__ import annotations
 
 import hashlib
 import json
+from typing import ClassVar
 
 from fastapi import Request
 
@@ -21,11 +23,33 @@ from app.schemas.query import NormalizedQuery
 
 
 class QueryPolicyEngine:
-    allowed_params = {
-        "q", "page", "page_size", "sort", "facet", "include_fields", "type", "collection", "language", "institution", "date_from", "date_to", "subject", "has_digital", "has_iiif",
+    allowed_params: ClassVar[set[str]] = {
+        "q",
+        "page",
+        "page_size",
+        "sort",
+        "facet",
+        "include_fields",
+        "format",
+        "type",
+        "collection",
+        "language",
+        "institution",
+        "date_from",
+        "date_to",
+        "subject",
+        "has_digital",
+        "has_iiif",
     }
 
-    filter_params = {"type", "collection", "language", "institution", "subject"}
+    filter_params: ClassVar[set[str]] = {"type", "collection", "language", "institution", "subject"}
+
+    # Hard caps protecting the backend from oversized inputs, independent of
+    # the per-profile policy knobs.
+    MAX_Q_LENGTH: ClassVar[int] = 512
+    MAX_FILTER_VALUES: ClassVar[int] = 50
+    MAX_FILTER_VALUE_LENGTH: ClassVar[int] = 256
+    MAX_INCLUDE_FIELDS: ClassVar[int] = 20
 
     def __init__(self, config: AppConfig) -> None:
         self.config = config
@@ -37,12 +61,22 @@ class QueryPolicyEngine:
     def parse(self, request: Request) -> NormalizedQuery:
         unknown = set(request.query_params.keys()) - self.allowed_params
         if unknown:
-            raise AppError("invalid_parameter", "Unknown query parameter(s)", {"unknown": sorted(unknown)})
+            raise AppError(
+                "invalid_parameter", "Unknown query parameter(s)", {"unknown": sorted(unknown)}
+            )
 
         qp = request.query_params
         q = qp.get("q")
         if not q and not self.profile.allow_empty_query:
-            raise AppError("missing_parameter", "q is required for this profile", {"parameter": "q"})
+            raise AppError(
+                "missing_parameter", "q is required for this profile", {"parameter": "q"}
+            )
+        if q is not None and len(q) > self.MAX_Q_LENGTH:
+            raise AppError(
+                "invalid_parameter",
+                "q is too long",
+                {"max_length": self.MAX_Q_LENGTH, "actual_length": len(q)},
+            )
 
         try:
             page = int(qp.get("page", "1"))
@@ -76,17 +110,58 @@ class QueryPolicyEngine:
 
         facets = qp.getlist("facet")
         if len(facets) > self.profile.max_facets:
-            raise AppError("invalid_parameter", "Too many facets requested", {"max_facets": self.profile.max_facets})
+            raise AppError(
+                "invalid_parameter",
+                "Too many facets requested",
+                {"max_facets": self.profile.max_facets},
+            )
         forbidden_facets = [f for f in facets if f not in self.config.allowed_facets]
         if forbidden_facets:
             raise AppError("forbidden", "Facet is not allowed", {"facets": forbidden_facets})
 
         include_fields = [x for x in qp.get("include_fields", "").split(",") if x]
-        forbidden_fields = [f for f in include_fields if f not in self.config.allowed_include_fields]
+        if len(include_fields) > self.MAX_INCLUDE_FIELDS:
+            raise AppError(
+                "invalid_parameter",
+                "Too many include_fields",
+                {"max": self.MAX_INCLUDE_FIELDS, "requested": len(include_fields)},
+            )
+        forbidden_fields = [
+            f for f in include_fields if f not in self.config.allowed_include_fields
+        ]
         if forbidden_fields:
-            raise AppError("forbidden", "include_fields contains forbidden fields", {"fields": forbidden_fields})
+            raise AppError(
+                "forbidden",
+                "include_fields contains forbidden fields",
+                {"fields": forbidden_fields},
+            )
 
-        filters = {name: qp.getlist(name) for name in self.filter_params if qp.getlist(name)}
+        filters: dict[str, list[str]] = {}
+        for name in self.filter_params:
+            values = qp.getlist(name)
+            if not values:
+                continue
+            if len(values) > self.MAX_FILTER_VALUES:
+                raise AppError(
+                    "invalid_parameter",
+                    "Too many values for filter",
+                    {
+                        "filter": name,
+                        "max": self.MAX_FILTER_VALUES,
+                        "requested": len(values),
+                    },
+                )
+            oversized = [v for v in values if len(v) > self.MAX_FILTER_VALUE_LENGTH]
+            if oversized:
+                raise AppError(
+                    "invalid_parameter",
+                    "Filter value too long",
+                    {
+                        "filter": name,
+                        "max_length": self.MAX_FILTER_VALUE_LENGTH,
+                    },
+                )
+            filters[name] = values
 
         return NormalizedQuery(
             q=q,

@@ -5,6 +5,7 @@ events with an ISO timestamp and the module logger name. Stdlib ``logging``
 handlers route into the same structlog renderer so third-party libraries
 (``httpx``, ``uvicorn``) get the same format.
 """
+
 from __future__ import annotations
 
 import logging
@@ -31,16 +32,23 @@ def configure(level: str | int | None = None) -> None:
         else getattr(logging, str(log_level_name).upper(), logging.INFO)
     )
 
+    # Local import: app.tracing depends on app.logging at import time
+    # (it calls get_logger). Deferring the import avoids the circular chain.
+    from app.tracing import structlog_tracing_processor
+
     shared_processors: list = [
         structlog.contextvars.merge_contextvars,
         structlog.processors.add_log_level,
         structlog.processors.TimeStamper(fmt="iso", utc=True),
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
+        # OTel-aware: injects trace_id/span_id when configure_tracing() ran.
+        # No-op otherwise; safe to include unconditionally.
+        structlog_tracing_processor,
     ]
 
     structlog.configure(
-        processors=shared_processors + [structlog.processors.JSONRenderer()],
+        processors=[*shared_processors, structlog.processors.JSONRenderer()],
         wrapper_class=structlog.make_filtering_bound_logger(log_level),
         context_class=dict,
         logger_factory=structlog.PrintLoggerFactory(file=sys.stderr),

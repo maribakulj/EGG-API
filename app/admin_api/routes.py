@@ -60,6 +60,24 @@ def test_query(request: Request) -> dict[str, object]:
     return {"translated": container.adapter.translate_query(nq)}
 
 
+@router.get("/debug/translate")
+def debug_translate(request: Request) -> dict[str, object]:
+    """Inspect how a query string would be parsed and translated.
+
+    Mirrors ``/admin/v1/test-query`` but accepts the same GET query-string
+    an operator would actually reproduce (``/v1/search?q=…``). Returns the
+    normalized query, the ETag cache key, and the backend DSL the adapter
+    would send — without touching the backend. Useful when a caller
+    reports unexpected results and you want to eyeball the pipeline.
+    """
+    nq = container.policy.parse(request)
+    return {
+        "normalized": nq.model_dump(mode="python"),
+        "cache_key": container.policy.compute_cache_key(nq),
+        "translated": container.adapter.translate_query(nq),
+    }
+
+
 @router.get("/usage")
 def usage_events(
     limit: int = Query(100, ge=1, le=1000),
@@ -82,5 +100,27 @@ def status() -> dict[str, object]:
     probe_doc = {"id": "probe", "type": "record"}
     mapping = container.mapping_health.classify(cfg.mapping, probe_doc)
     if any(v == "missing" for v in mapping.values()):
-        raise AppError("configuration_error", "Mapping has missing required/recommended sources", {"mapping": mapping}, 500)
+        raise AppError(
+            "configuration_error",
+            "Mapping has missing required/recommended sources",
+            {"mapping": mapping},
+            500,
+        )
     return {"status": "ok", "sources": container.adapter.list_sources(), "mapping": mapping}
+
+
+@router.get("/storage/stats")
+def storage_stats() -> dict[str, object]:
+    """Row counts, on-disk size, schema version and last purge snapshot.
+
+    Intended for capacity planning and retention sanity checks. No secret
+    material is returned — only structural counters and aggregate bytes.
+    """
+    from app.main import _last_purge_state
+
+    stats = container.store.storage_stats()
+    cfg = container.config_manager.config.storage
+    stats["last_purge"] = dict(_last_purge_state)
+    stats["retention_days"] = cfg.usage_events_retention_days
+    stats["purge_interval_seconds"] = cfg.purge_interval_seconds
+    return stats

@@ -1,8 +1,13 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request, Response
+import csv
+import io
+from typing import Any
 
-from app.auth.dependencies import enforce_public_auth
+from fastapi import APIRouter, Depends, Request, Response
+from fastapi.responses import PlainTextResponse
+
+from app.auth.dependencies import enforce_public_auth, require_admin_key
 from app.dependencies import container
 from app.errors import AppError
 from app.http_cache import apply_cache_headers
@@ -11,10 +16,74 @@ from app.schemas.record import Record, SearchResponse
 router = APIRouter(prefix="/v1", tags=["public"])
 
 
-@router.get("/health")
-def health() -> dict[str, object]:
-    """Liveness + backend health probe."""
+# Columns surfaced in the CSV export for /v1/search. Keeping the list
+# deterministic (and intentionally flat) lets a GLAM consumer pipe the
+# response into a spreadsheet without parsing nested JSON.
+_CSV_COLUMNS: tuple[str, ...] = (
+    "id",
+    "type",
+    "title",
+    "subtitle",
+    "description",
+    "creators",
+    "languages",
+    "subjects",
+    "collection",
+    "holding_institution",
+)
+
+
+def _csv_cell(record: Record, column: str) -> str:
+    value: Any = getattr(record, column, "")
+    if value is None:
+        return ""
+    if isinstance(value, list):
+        return "; ".join(str(v) for v in value if v)
+    if hasattr(value, "model_dump"):
+        dumped = value.model_dump()
+        # Prefer a "label" if present (LabelRef), fall back to the raw id.
+        return str(dumped.get("label") or dumped.get("id") or "")
+    return str(value)
+
+
+def _render_csv(results: list[Record]) -> str:
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, quoting=csv.QUOTE_MINIMAL)
+    writer.writerow(_CSV_COLUMNS)
+    for record in results:
+        writer.writerow([_csv_cell(record, col) for col in _CSV_COLUMNS])
+    return buffer.getvalue()
+
+
+@router.get("/livez")
+def livez() -> dict[str, str]:
+    """Liveness probe: does the process respond?
+
+    Minimal by design — returns a constant body. Safe to expose publicly;
+    no internal state leaks.
+    """
+    return {"status": "ok"}
+
+
+@router.get("/readyz")
+def readyz(_: str = Depends(require_admin_key)) -> dict[str, object]:
+    """Readiness probe: can the service serve traffic?
+
+    Admin-authenticated because it proxies the backend's internal cluster
+    health — an operator wants detail; an anonymous caller must not fingerprint
+    the upstream state (green/yellow/red, shard counts, cluster name).
+    """
     return {"status": "ok", "backend": container.adapter.health()}
+
+
+@router.get("/health", deprecated=True)
+def health() -> dict[str, str]:
+    """Deprecated — prefer ``/v1/livez`` (public) and ``/v1/readyz`` (admin).
+
+    Retained as a minimal alias for backwards compatibility. Returns only the
+    liveness payload; backend state is available via ``/v1/readyz``.
+    """
+    return {"status": "ok"}
 
 
 @router.get("/search", response_model=SearchResponse, response_model_exclude_none=False)
@@ -28,9 +97,21 @@ def search(
     Applies the security profile (page size, facet allowlist, depth limit) before
     forwarding a single call to the backend; aggregations are extracted from the
     same response when the caller requested facets.
+
+    ``format=csv`` switches the response to ``text/csv`` with a fixed,
+    spreadsheet-friendly column set (no facet payload). The query-policy
+    engine accepts and validates the parameter.
     """
+    fmt = (request.query_params.get("format") or "json").lower()
+    if fmt not in {"json", "csv"}:
+        raise AppError(
+            "invalid_parameter",
+            "format must be one of json|csv",
+            {"format": fmt},
+        )
+
     nq = container.policy.parse(request)
-    etag = f'"search:{container.policy.compute_cache_key(nq)}"'
+    etag = f'"search:{fmt}:{container.policy.compute_cache_key(nq)}"'
     cached = apply_cache_headers(request, response, etag)
     if cached is not None:
         return cached
@@ -38,6 +119,22 @@ def search(
     payload = container.adapter.search(nq)
     hits = payload.get("hits", {}).get("hits", [])
     results = [container.mapper.map_record(h.get("_source", {})) for h in hits]
+
+    if fmt == "csv":
+        body = _render_csv(results)
+        csv_response = PlainTextResponse(
+            content=body,
+            media_type="text/csv; charset=utf-8",
+        )
+        # Propagate the cache metadata set by apply_cache_headers; the fresh
+        # response object does not inherit headers from the search handler's
+        # placeholder `response`.
+        for header in ("Cache-Control", "ETag"):
+            if header in response.headers:
+                csv_response.headers[header] = response.headers[header]
+        csv_response.headers["Content-Disposition"] = 'attachment; filename="search.csv"'
+        return csv_response
+
     facets = container.adapter.extract_facets(payload) if nq.facets else {}
     total_value = payload.get("hits", {}).get("total", {}).get("value", len(results))
     return SearchResponse(
@@ -64,10 +161,10 @@ def get_record(
     raw = container.adapter.get_record(record_id)
     if raw is None:
         raise AppError("not_found", "Record not found", status_code=404)
-    record = container.mapper.map_record(raw)
-    if not record.id or not record.type:
-        raise AppError("configuration_error", "Required structural fields missing", status_code=500)
-    return record
+    # map_record raises AppError("bad_gateway", 502) if the backend record
+    # is missing a usable id; that surfaces as the right status without this
+    # extra guard.
+    return container.mapper.map_record(raw)
 
 
 @router.get("/facets")
@@ -86,9 +183,10 @@ def facets(
 
 
 # ---------------------------------------------------------------------------
-# Optional V1 endpoints (SPECS.md §12). /collections and /schema are active;
-# /suggest and /manifest/{id} are declared but return 501 until their backend
-# plumbing is contributed — this keeps the OpenAPI surface honest.
+# Optional V1 endpoints (SPECS.md §12). /collections and /schema are active.
+# /suggest and /manifest/{id} were removed in Sprint 5: they were declared-
+# but-501 placeholders that only padded the OpenAPI surface. Add them back
+# here when their backend plumbing lands so the public contract stays honest.
 # ---------------------------------------------------------------------------
 
 
@@ -123,25 +221,3 @@ def public_schema(_: None = Depends(enforce_public_auth)) -> dict[str, object]:
         "allowed_sorts": list(cfg.allowed_sorts),
         "filters": sorted(container.policy.filter_params),
     }
-
-
-@router.get("/suggest")
-def suggest(_: None = Depends(enforce_public_auth)) -> dict[str, object]:
-    """Autocomplete suggestions (SPECS §12.2). Not yet implemented."""
-    raise AppError(
-        "not_implemented",
-        "The /v1/suggest endpoint is declared but not yet implemented.",
-        {"spec": "SPECS.md §12.2"},
-        status_code=501,
-    )
-
-
-@router.get("/manifest/{record_id}")
-def manifest(record_id: str, _: None = Depends(enforce_public_auth)) -> dict[str, object]:
-    """IIIF manifest passthrough (SPECS §12.3). Not yet implemented."""
-    raise AppError(
-        "not_implemented",
-        "The /v1/manifest/{id} endpoint is declared but not yet implemented.",
-        {"spec": "SPECS.md §12.3", "record_id": record_id},
-        status_code=501,
-    )

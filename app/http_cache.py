@@ -1,10 +1,21 @@
 """HTTP caching helpers for public GET endpoints.
 
-Implements ``Cache-Control`` (public, max-age) and strong ``ETag`` validation
-with ``If-None-Match`` support returning ``304 Not Modified``. The TTL is driven
-by ``CacheConfig.public_max_age_seconds``; when ``CacheConfig.enabled`` is
+Implements ``Cache-Control`` and strong ``ETag`` validation with
+``If-None-Match`` returning ``304 Not Modified``. The TTL is driven by
+``CacheConfig.public_max_age_seconds``; when ``CacheConfig.enabled`` is
 ``False`` the helper is a no-op.
+
+The ``Cache-Control`` directive follows the auth mode:
+
+- ``anonymous_allowed`` → ``public, max-age=N`` (safe for shared caches).
+- ``api_key_optional``/``api_key_required`` → ``private, max-age=N``. The
+  response is keyed to a caller holding a specific API key; shared caches
+  MUST NOT store it. Dropping the old ``Vary: x-api-key`` in favor of
+  ``private`` is both more correct (intermediaries ignore ``Vary`` on secret
+  headers inconsistently) and keeps the browser cache tight to the key
+  that fetched the response.
 """
+
 from __future__ import annotations
 
 from fastapi import Request, Response
@@ -15,6 +26,12 @@ from app.dependencies import container
 def _etag_matches(header_value: str, etag: str) -> bool:
     candidates = [c.strip() for c in header_value.split(",") if c.strip()]
     return any(c == etag or c == "*" for c in candidates)
+
+
+def _cache_control_directive(max_age: int) -> str:
+    mode = container.config_manager.config.auth.public_mode
+    directive = "public" if mode == "anonymous_allowed" else "private"
+    return f"{directive}, max-age={max_age}"
 
 
 def apply_cache_headers(
@@ -32,15 +49,14 @@ def apply_cache_headers(
         return None
 
     max_age = max(0, int(cache_cfg.public_max_age_seconds))
-    response.headers["Cache-Control"] = f"public, max-age={max_age}"
+    cache_control = _cache_control_directive(max_age)
+    response.headers["Cache-Control"] = cache_control
     response.headers["ETag"] = etag
-    response.headers["Vary"] = "x-api-key"
 
     inm = request.headers.get("if-none-match")
     if inm and _etag_matches(inm, etag):
         not_modified = Response(status_code=304)
-        not_modified.headers["Cache-Control"] = response.headers["Cache-Control"]
+        not_modified.headers["Cache-Control"] = cache_control
         not_modified.headers["ETag"] = etag
-        not_modified.headers["Vary"] = "x-api-key"
         return not_modified
     return None

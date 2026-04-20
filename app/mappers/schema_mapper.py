@@ -10,15 +10,18 @@ Python code. Mode helpers are defensive by design: invalid dates return
 ``raw_fields`` (enabled per security profile) drops any backend-internal key
 prefixed with ``_``.
 """
+
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from datetime import datetime
 from string import Template
 from typing import Any
 from urllib.parse import urlparse
 
 from app.config.models import AppConfig
+from app.errors import AppError
 from app.schemas.record import Record
 
 logger = logging.getLogger(__name__)
@@ -33,6 +36,76 @@ def _filter_internal_fields(doc: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in doc.items() if not (isinstance(k, str) and k.startswith("_"))}
 
 
+# ---------------------------------------------------------------------------
+# Mode handlers.
+#
+# Each handler takes ``(rule, doc)`` and returns the mapped value. Adding a
+# new mode is a one-line dict entry below the handler — no touching
+# ``map_record`` — and every rule in _MODE_HANDLERS corresponds one-to-one
+# with a ``MappingMode`` token in ``app.config.models``.
+# ---------------------------------------------------------------------------
+
+
+def _apply_direct(rule: dict[str, Any], doc: dict[str, Any]) -> Any:
+    return doc.get(rule.get("source", ""))
+
+
+def _apply_constant(rule: dict[str, Any], _doc: dict[str, Any]) -> Any:
+    return rule.get("constant")
+
+
+def _apply_split_list(rule: dict[str, Any], doc: dict[str, Any]) -> Any:
+    value = doc.get(rule.get("source", ""))
+    if not value:
+        return []
+    separator = rule.get("separator", ";")
+    return [x.strip() for x in str(value).split(separator) if x.strip()]
+
+
+def _apply_first_non_empty(rule: dict[str, Any], doc: dict[str, Any]) -> Any:
+    for source in rule.get("sources", []):
+        value = doc.get(source)
+        if value:
+            return value
+    return None
+
+
+def _apply_template(rule: dict[str, Any], doc: dict[str, Any]) -> Any:
+    return Template(rule.get("template") or "").safe_substitute(doc)
+
+
+def _apply_nested_object(rule: dict[str, Any], doc: dict[str, Any]) -> Any:
+    value = doc.get(rule.get("source", ""))
+    return value if isinstance(value, dict) else {}
+
+
+def _apply_date_parser(rule: dict[str, Any], doc: dict[str, Any]) -> Any:
+    source = rule.get("source", "")
+    return _parse_iso_date(doc.get(source), source)
+
+
+def _apply_boolean_cast(rule: dict[str, Any], doc: dict[str, Any]) -> Any:
+    return bool(doc.get(rule.get("source", "")))
+
+
+def _apply_url_passthrough(rule: dict[str, Any], doc: dict[str, Any]) -> Any:
+    return _safe_public_url(doc.get(rule.get("source", "")))
+
+
+_ModeHandler = Callable[[dict[str, Any], dict[str, Any]], Any]
+_MODE_HANDLERS: dict[str, _ModeHandler] = {
+    "direct": _apply_direct,
+    "constant": _apply_constant,
+    "split_list": _apply_split_list,
+    "first_non_empty": _apply_first_non_empty,
+    "template": _apply_template,
+    "nested_object": _apply_nested_object,
+    "date_parser": _apply_date_parser,
+    "boolean_cast": _apply_boolean_cast,
+    "url_passthrough": _apply_url_passthrough,
+}
+
+
 class SchemaMapper:
     def __init__(self, config: AppConfig) -> None:
         self.config = config
@@ -42,40 +115,34 @@ class SchemaMapper:
         for public_field, rule in self.config.mapping.items():
             mapped[public_field] = self._apply_mode(rule.mode, rule.model_dump(), doc)
 
-        mapped.setdefault("id", str(doc.get("id") or doc.get("_id") or ""))
-        mapped.setdefault("type", str(doc.get("type") or "record"))
+        # `setdefault` does NOT overwrite an explicit None that a mapping rule
+        # produced when the configured source was absent. Guard both structural
+        # fields explicitly: missing id/type from the backend is an upstream
+        # data issue, not an EGG config bug -> raise 502 instead of a Pydantic
+        # 500 later.
+        if not mapped.get("id"):
+            mapped["id"] = str(doc.get("id") or doc.get("_id") or "")
+        if not mapped.get("type"):
+            mapped["type"] = str(doc.get("type") or "record")
+        if not mapped["id"]:
+            raise AppError(
+                "bad_gateway",
+                "Backend record is missing a usable identifier",
+                {"hint": "id / _id fields were empty or absent"},
+                status_code=502,
+            )
         if self.config.profiles[self.config.security_profile].allow_raw_fields:
             mapped["raw_fields"] = _filter_internal_fields(doc)
         return Record.model_validate(mapped)
 
-    def _apply_mode(self, mode: str, rule: dict[str, Any], doc: dict[str, Any]) -> Any:
-        if mode == "direct":
-            return doc.get(rule.get("source", ""))
-        if mode == "constant":
-            return rule.get("constant")
-        if mode == "split_list":
-            value = doc.get(rule.get("source", ""))
-            if not value:
-                return []
-            return [x.strip() for x in str(value).split(rule.get("separator", ";")) if x.strip()]
-        if mode == "first_non_empty":
-            for source in rule.get("sources", []):
-                value = doc.get(source)
-                if value:
-                    return value
+    @staticmethod
+    def _apply_mode(mode: str, rule: dict[str, Any], doc: dict[str, Any]) -> Any:
+        handler = _MODE_HANDLERS.get(mode)
+        if handler is None:
+            # Pydantic's MappingMode Literal prevents this at config-load
+            # time; the fallback covers rules constructed programmatically.
             return None
-        if mode == "template":
-            return Template(rule.get("template") or "").safe_substitute(doc)
-        if mode == "nested_object":
-            source = rule.get("source", "")
-            return doc.get(source) if isinstance(doc.get(source), dict) else {}
-        if mode == "date_parser":
-            return _parse_iso_date(doc.get(rule.get("source", "")), rule.get("source"))
-        if mode == "boolean_cast":
-            return bool(doc.get(rule.get("source", "")))
-        if mode == "url_passthrough":
-            return _safe_public_url(doc.get(rule.get("source", "")))
-        return None
+        return handler(rule, doc)
 
 
 def _parse_iso_date(value: Any, source_name: str | None = None) -> str | None:
@@ -85,9 +152,7 @@ def _parse_iso_date(value: Any, source_name: str | None = None) -> str | None:
     try:
         parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     except (TypeError, ValueError) as exc:
-        logger.warning(
-            "date_parser: invalid value in source=%s reason=%s", source_name, exc
-        )
+        logger.warning("date_parser: invalid value in source=%s reason=%s", source_name, exc)
         return None
     return parsed.date().isoformat()
 

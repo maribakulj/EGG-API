@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import logging
+import sys
+import threading
+
 from app.adapters.elasticsearch.adapter import ElasticsearchAdapter
 from app.auth.api_keys import ApiKeyManager
 from app.config.manager import ConfigManager
@@ -9,10 +13,6 @@ from app.query_policy.engine import QueryPolicyEngine
 from app.rate_limit.limiter import InMemoryRateLimiter
 from app.runtime_paths import get_state_db_path, resolve_bootstrap_admin_key
 from app.storage.sqlite_store import SQLiteStore
-
-import logging
-import sys
-import threading
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +51,8 @@ class Container:
             timeout_seconds=config.backend.timeout_seconds,
             max_retries=config.backend.max_retries,
             retry_backoff_seconds=config.backend.retry_backoff_seconds,
+            retry_backoff_cap_seconds=config.backend.retry_backoff_cap_seconds,
+            retry_deadline_seconds=config.backend.retry_deadline_seconds,
             max_buckets_per_facet=config.profiles[config.security_profile].max_buckets_per_facet,
         )
 
@@ -71,14 +73,27 @@ class Container:
             )
             self.mapper = SchemaMapper(config)
             self.policy = QueryPolicyEngine(config)
+            previous_adapter = self.adapter
             self.adapter = ElasticsearchAdapter(
                 config.backend.url,
                 config.backend.index,
                 timeout_seconds=config.backend.timeout_seconds,
                 max_retries=config.backend.max_retries,
                 retry_backoff_seconds=config.backend.retry_backoff_seconds,
-                max_buckets_per_facet=config.profiles[config.security_profile].max_buckets_per_facet,
+                retry_backoff_cap_seconds=config.backend.retry_backoff_cap_seconds,
+                retry_deadline_seconds=config.backend.retry_deadline_seconds,
+                max_buckets_per_facet=config.profiles[
+                    config.security_profile
+                ].max_buckets_per_facet,
             )
+            # Release the old httpx client + its connection pool. If a handler
+            # was still holding a reference it keeps working until it drops it,
+            # but we stop leaking sockets/FDs across reloads.
+            if previous_adapter is not None:
+                try:
+                    previous_adapter.client.close()
+                except Exception:
+                    logger.exception("previous_adapter_close_failed")
 
 
 container = Container()

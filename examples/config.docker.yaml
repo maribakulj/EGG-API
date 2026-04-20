@@ -1,0 +1,96 @@
+# Docker-compose flavored config: points at the "elasticsearch" service name
+# instead of localhost. Use with `docker compose up` where Elasticsearch is a
+# sibling container. For local (non-container) runs, see examples/config.yaml.
+backend:
+  type: elasticsearch
+  url: http://elasticsearch:9200
+  index: records
+  timeout_seconds: 15.0
+  max_retries: 2
+  retry_backoff_seconds: 0.2
+
+storage:
+  sqlite_path: /var/lib/egg/data/egg_state.sqlite3
+
+security_profile: prudent
+profiles:
+  prudent:
+    allow_empty_query: false
+    page_size_default: 20
+    page_size_max: 50
+    max_facets: 3
+    max_buckets_per_facet: 20
+    allow_raw_fields: false
+    allow_debug_translation: false
+    max_depth: 2000
+  standard:
+    allow_empty_query: false
+    page_size_default: 20
+    page_size_max: 100
+    max_facets: 5
+    max_buckets_per_facet: 50
+    allow_raw_fields: false
+    allow_debug_translation: false
+    max_depth: 2000
+
+auth:
+  public_mode: anonymous_allowed
+  admin_cookie_secure: false  # http inside compose network
+  admin_cookie_samesite: lax
+  admin_session_ttl_hours: 12
+
+cors:
+  mode: off
+  allow_origins: []
+  allow_methods: ["GET"]
+  allow_headers: ["x-api-key", "content-type"]
+
+cache:
+  enabled: true
+  public_max_age_seconds: 60
+
+rate_limit:
+  public_max_requests: 60
+  public_window_seconds: 60
+  admin_login_max_requests: 10
+  admin_login_window_seconds: 300
+
+allowed_sorts:
+  - relevance
+  - date_desc
+  - date_asc
+  - title_asc
+
+allowed_facets:
+  - type
+  - language
+  - collection
+  - institution
+  - subject
+
+allowed_include_fields:
+  - id
+  - type
+  - title
+  - description
+  - creators
+
+mapping:
+  id:
+    source: id
+    mode: direct
+    criticality: required
+  type:
+    source: type
+    mode: direct
+    criticality: required
+  title:
+    source: title
+    mode: direct
+  description:
+    source: description
+    mode: direct
+  creators:
+    source: creator_csv
+    mode: split_list
+    separator: ";"

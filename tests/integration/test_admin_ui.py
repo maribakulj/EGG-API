@@ -4,7 +4,11 @@ from app.dependencies import container
 
 
 def _login(client):
-    return client.post("/admin/login", data={"api_key": container.api_keys.default_admin_key}, follow_redirects=False)
+    return client.post(
+        "/admin/login",
+        data={"api_key": container.api_keys.default_admin_key},
+        follow_redirects=False,
+    )
 
 
 def test_ui_routes_protected(client) -> None:
@@ -28,13 +32,13 @@ def test_config_page_shows_current_config(client) -> None:
     assert container.config_manager.config.backend.url in page.text
 
 
-def test_config_update_valid_flow(client) -> None:
-    _login(client)
+def test_config_update_valid_flow(client, admin_ui_session) -> None:
     cfg = container.config_manager.config
     profile = cfg.profiles[cfg.security_profile]
     response = client.post(
         "/admin/ui/config",
         data={
+            "csrf_token": admin_ui_session,
             "backend_url": "http://example.org:9200",
             "backend_index": "newindex",
             "security_profile": cfg.security_profile,
@@ -50,13 +54,13 @@ def test_config_update_valid_flow(client) -> None:
     assert "Configuration saved successfully" in response.text
 
 
-def test_config_update_invalid_rejected(client) -> None:
-    _login(client)
+def test_config_update_invalid_rejected(client, admin_ui_session) -> None:
     cfg = container.config_manager.config
     profile = cfg.profiles[cfg.security_profile]
     response = client.post(
         "/admin/ui/config",
         data={
+            "csrf_token": admin_ui_session,
             "backend_url": "http://example.org:9200",
             "backend_index": "x",
             "security_profile": "not-a-profile",
@@ -72,13 +76,19 @@ def test_config_update_invalid_rejected(client) -> None:
     assert "Unable to save configuration" in response.text
 
 
-def test_api_key_create_and_suspend_flow(client) -> None:
-    _login(client)
-    created = client.post("/admin/ui/keys/create", data={"key_id": "ui-test-key"})
+def test_api_key_create_and_suspend_flow(client, admin_ui_session) -> None:
+    created = client.post(
+        "/admin/ui/keys/create",
+        data={"key_id": "ui-test-key", "csrf_token": admin_ui_session},
+    )
     assert created.status_code == 200
     assert "Copy it now" in created.text
 
-    action = client.post("/admin/ui/keys/ui-test-key/status", data={"action": "suspend"}, follow_redirects=False)
+    action = client.post(
+        "/admin/ui/keys/ui-test-key/status",
+        data={"action": "suspend", "csrf_token": admin_ui_session},
+        follow_redirects=False,
+    )
     assert action.status_code == 303
 
     page = client.get("/admin/ui/keys")

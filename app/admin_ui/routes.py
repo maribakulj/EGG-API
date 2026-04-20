@@ -5,6 +5,7 @@ All HTML rendering goes through Jinja2 templates with autoescape enabled
 fields are added to the templates, because any untrusted value is escaped
 by default. Do not build HTML via f-strings in this module.
 """
+
 from __future__ import annotations
 
 import re
@@ -15,11 +16,22 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from app.admin_ui.auth import SESSION_COOKIE, clear_ui_session, create_ui_session_for_api_key, get_ui_key_id
+from app.admin_ui.auth import (
+    CSRF_FORM_FIELD,
+    CSRF_HEADER,
+    SESSION_COOKIE,
+    clear_ui_session,
+    create_ui_session_for_api_key,
+    get_csrf_for_request,
+    get_ui_key_id,
+    verify_csrf,
+)
 from app.config.models import AppConfig
 from app.dependencies import container
 from app.errors import AppError
+from app.logging import get_logger
 
+logger = get_logger("egg.admin_ui")
 router = APIRouter(prefix="/admin", tags=["admin-ui"])
 
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
@@ -33,6 +45,11 @@ _KEY_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_.-]{1,64}$")
 
 
 async def _form(request: Request) -> dict[str, str]:
+    # _enforce_csrf stashes the parsed body when it runs; reuse it so the
+    # downstream POST handler never tries to read the stream a second time.
+    cached = getattr(request.state, "parsed_form", None)
+    if cached is not None:
+        return cached
     raw = (await request.body()).decode("utf-8", errors="replace")
     parsed = parse_qs(raw, keep_blank_values=True)
     return {k: (v[0] if v else "") for k, v in parsed.items()}
@@ -46,9 +63,38 @@ def _render(
     **context,
 ) -> HTMLResponse:
     context.setdefault("current_key_id", get_ui_key_id(request))
-    return templates.TemplateResponse(
-        request, template, context, status_code=status_code
-    )
+    # Make the CSRF token available to every template so any form can include
+    # it without each route explicitly passing it through the context.
+    context.setdefault("csrf_token", get_csrf_for_request(request))
+    return templates.TemplateResponse(request, template, context, status_code=status_code)
+
+
+async def _enforce_csrf(request: Request) -> HTMLResponse | None:
+    """Validate the CSRF token attached to a POST.
+
+    Prefers the form field; falls back to an ``X-CSRF-Token`` header for
+    fetch/XHR callers. Returns a 403 page on mismatch, ``None`` if the token
+    is accepted.
+    """
+    raw = (await request.body()).decode("utf-8", errors="replace")
+    parsed = parse_qs(raw, keep_blank_values=True)
+    form_token = parsed.get(CSRF_FORM_FIELD, [""])[0]
+    header_token = request.headers.get(CSRF_HEADER)
+    submitted = form_token or header_token
+    if not verify_csrf(request, submitted):
+        return _render(
+            "error.html",
+            request,
+            status_code=403,
+            error=(
+                "CSRF check failed. Reload the page and retry. If the problem "
+                "persists, sign in again."
+            ),
+        )
+    # Stash the already-parsed body so downstream handlers can reuse it
+    # instead of consuming the request stream twice.
+    request.state.parsed_form = {k: (v[0] if v else "") for k, v in parsed.items()}
+    return None
 
 
 def _set_session_cookie(response, token: str) -> None:
@@ -106,9 +152,32 @@ async def login_submit(request: Request):
 
 
 @router.post("/logout")
-def logout(request: Request) -> RedirectResponse:
+async def logout(request: Request):
     """Invalidate the current session and redirect to the login page."""
+    # CSRF-protected: a malicious cross-origin POST should not sign the user
+    # out. Logged-out users hit the redirect anyway thanks to the fallback.
+    csrf_error = await _enforce_csrf(request)
+    if csrf_error is not None:
+        return csrf_error
     clear_ui_session(request)
+    response = RedirectResponse("/admin/login", status_code=303)
+    response.delete_cookie(SESSION_COOKIE)
+    return response
+
+
+@router.post("/logout-everywhere")
+async def logout_everywhere(request: Request):
+    """Invalidate every active UI session for the currently signed-in key_id.
+
+    Useful when the operator suspects a session leak on another device.
+    """
+    key_id = get_ui_key_id(request)
+    if key_id is None:
+        return RedirectResponse("/admin/login", status_code=303)
+    csrf_error = await _enforce_csrf(request)
+    if csrf_error is not None:
+        return csrf_error
+    container.store.invalidate_sessions_for_key_id(key_id)
     response = RedirectResponse("/admin/login", status_code=303)
     response.delete_cookie(SESSION_COOKIE)
     return response
@@ -130,7 +199,7 @@ def dashboard(request: Request):
     backend_status = "ok"
     try:
         container.adapter.health()
-    except Exception:  # noqa: BLE001
+    except Exception:
         backend_status = "unavailable"
 
     usage = container.store.usage_summary()
@@ -181,6 +250,9 @@ async def config_update(request: Request):
     guard = _require_login(request)
     if guard is not None:
         return guard
+    csrf_error = await _enforce_csrf(request)
+    if csrf_error is not None:
+        return csrf_error
 
     data = await _form(request)
     try:
@@ -188,16 +260,18 @@ async def config_update(request: Request):
         cfg.backend.url = data.get("backend_url", "").strip()
         cfg.backend.index = data.get("backend_index", "").strip()
         cfg.security_profile = data.get("security_profile", "")
-        cfg.auth.public_mode = data.get("public_mode", "")
+        # `public_mode` is a Literal on the model; the actual value is
+        # validated below via model_validate, so the mypy-visible assignment
+        # is intentionally broadened — invalid strings still surface as a
+        # user-visible error.
+        cfg.auth.public_mode = data.get("public_mode", "")  # type: ignore[assignment]
         cfg.storage.sqlite_path = data.get("sqlite_path", "").strip()
 
         if cfg.security_profile not in cfg.profiles:
             raise ValueError("Unknown security profile")
 
         target_profile = cfg.profiles[cfg.security_profile]
-        target_profile.allow_empty_query = (
-            data.get("allow_empty_query", "false").lower() == "true"
-        )
+        target_profile.allow_empty_query = data.get("allow_empty_query", "false").lower() == "true"
         target_profile.page_size_default = int(data.get("page_size_default", "20"))
         target_profile.page_size_max = int(data.get("page_size_max", "50"))
         target_profile.max_depth = int(data.get("max_depth", "2000"))
@@ -208,10 +282,14 @@ async def config_update(request: Request):
 
         container.reload(AppConfig.model_validate(cfg.model_dump(mode="python")))
         return _render_config(request, message="Configuration saved successfully.")
-    except Exception as exc:  # noqa: BLE001
+    except Exception:
+        # Detail goes to the structured log; the form stays generic so we
+        # don't leak internal state (Pydantic traces, paths, DB errors) to
+        # whatever browser happens to load the page.
+        logger.exception("admin_config_update_failed")
         return _render_config(
             request,
-            error=f"Unable to save configuration: {exc}",
+            error="Unable to save configuration. Check the server logs for details.",
             status_code=400,
         )
 
@@ -269,6 +347,9 @@ async def create_key(request: Request):
     guard = _require_login(request)
     if guard is not None:
         return guard
+    csrf_error = await _enforce_csrf(request)
+    if csrf_error is not None:
+        return csrf_error
 
     data = await _form(request)
     key_id_input = data.get("key_id", "").strip()
@@ -284,10 +365,11 @@ async def create_key(request: Request):
 
     try:
         created = container.api_keys.create(key_id_input)
-    except Exception as exc:  # noqa: BLE001
+    except Exception:
+        logger.exception("admin_create_key_failed", key_id=key_id_input)
         return _render_keys(
             request,
-            error=f"Unable to create API key: {exc}",
+            error="Unable to create API key. Check the server logs for details.",
             status_code=400,
         )
     return _render_keys(
@@ -297,22 +379,63 @@ async def create_key(request: Request):
     )
 
 
+@router.post("/ui/keys/{key_id}/rotate", response_class=HTMLResponse)
+async def rotate_key(request: Request, key_id: str):
+    """Regenerate the raw secret behind ``key_id`` and invalidate its sessions.
+
+    The new secret is rendered once in the flash panel; the operator must
+    copy it or it is lost. All UI sessions tied to ``key_id`` are purged so
+    the user is forced to sign in again with the new value.
+    """
+    guard = _require_login(request)
+    if guard is not None:
+        return guard
+    csrf_error = await _enforce_csrf(request)
+    if csrf_error is not None:
+        return csrf_error
+    if not _KEY_ID_PATTERN.match(key_id):
+        return _render_keys(request, error="Invalid key label.", status_code=400)
+
+    new_secret = container.api_keys.rotate(key_id)
+    if new_secret is None:
+        return _render_keys(request, error=f"Unknown key label: {key_id}", status_code=404)
+    container.store.invalidate_sessions_for_key_id(key_id)
+
+    # Reuse the `new_key` slot to render the secret panel once.
+    rotated = {"key_id": key_id, "key": new_secret}
+    response = _render_keys(
+        request,
+        message=(
+            f"Key '{key_id}' rotated. Copy the new secret now — it will not be "
+            "shown again. Active sessions for this key have been revoked."
+        ),
+        new_key=rotated,
+    )
+    # When rotating the key we used to sign in, kick ourselves out too.
+    if get_ui_key_id(request) == key_id:
+        response.delete_cookie(SESSION_COOKIE)
+    return response
+
+
 @router.post("/ui/keys/{key_id}/status")
-async def key_status_action(request: Request, key_id: str) -> RedirectResponse:
+async def key_status_action(request: Request, key_id: str):
     """Activate, suspend, or revoke an existing API key."""
     guard = _require_login(request)
     if guard is not None:
         return guard
+    csrf_error = await _enforce_csrf(request)
+    if csrf_error is not None:
+        return csrf_error
     if not _KEY_ID_PATTERN.match(key_id):
         return RedirectResponse("/admin/ui/keys", status_code=303)
     data = await _form(request)
     action = data.get("action", "")
     if action == "revoke":
-        container.api_keys.revoke(key_id)
+        container.api_keys.revoke_by_key_id(key_id)
     elif action == "suspend":
-        container.api_keys.suspend(key_id)
+        container.api_keys.suspend_by_key_id(key_id)
     elif action == "activate":
-        container.api_keys.activate(key_id)
+        container.api_keys.activate_by_key_id(key_id)
     return RedirectResponse("/admin/ui/keys", status_code=303)
 
 

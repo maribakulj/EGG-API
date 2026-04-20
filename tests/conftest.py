@@ -14,11 +14,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.auth.api_keys import ApiKeyManager
-from app.dependencies import container
-from app.rate_limit.limiter import InMemoryRateLimiter
 from app.config.models import AppConfig
+from app.dependencies import container
 from app.mappers.schema_mapper import SchemaMapper
 from app.query_policy.engine import QueryPolicyEngine
+from app.rate_limit.limiter import InMemoryRateLimiter
 from app.schemas.query import NormalizedQuery
 from app.storage.sqlite_store import SQLiteStore
 
@@ -43,9 +43,18 @@ class FakeAdapter:
         return {
             "hits": {
                 "total": {"value": 1},
-                "hits": [{"_source": {"id": "1", "type": "object", "title": "Test title", "creator_csv": "A;B"}}],
+                "hits": [
+                    {
+                        "_source": {
+                            "id": "1",
+                            "type": "object",
+                            "title": "Test title",
+                            "creator_csv": "A;B",
+                        }
+                    }
+                ],
             },
-            "aggregations": {"type": {"buckets": [{"key": "object", "doc_count": 1}]}}
+            "aggregations": {"type": {"buckets": [{"key": "object", "doc_count": 1}]}},
         }
 
     def get_record(self, record_id: str) -> dict[str, Any] | None:
@@ -96,3 +105,24 @@ def client() -> TestClient:
 @pytest.fixture()
 def admin_headers() -> dict[str, str]:
     return {"x-api-key": container.api_keys.default_admin_key}
+
+
+@pytest.fixture()
+def admin_ui_session(client: TestClient, admin_headers: dict[str, str]) -> str:
+    """Log in through the admin UI and return the CSRF token for POSTs.
+
+    All state-changing UI handlers require ``csrf_token`` (form field or
+    ``X-CSRF-Token`` header). Tests that exercise those endpoints should
+    submit the returned value.
+    """
+    from app.admin_ui.auth import _csrf_for_session
+
+    response = client.post(
+        "/admin/login",
+        data={"api_key": admin_headers["x-api-key"]},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    session_token = client.cookies.get("egg_admin_session")
+    assert session_token, "login should set the session cookie"
+    return _csrf_for_session(session_token)

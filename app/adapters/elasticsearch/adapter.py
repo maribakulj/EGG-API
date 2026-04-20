@@ -8,12 +8,15 @@ exhaustion surfaces as :class:`AppError` (``backend_unavailable``, 503).
 ``get_facets()`` never round-trip twice for the same call. Minor version
 gating blocks Elasticsearch < 7.
 """
+
 from __future__ import annotations
 
+import random
 import time
 from typing import Any
 
 import httpx
+import structlog
 
 from app.errors import AppError
 from app.logging import get_logger
@@ -21,6 +24,29 @@ from app.metrics import backend_errors
 from app.schemas.query import NormalizedQuery
 
 logger = get_logger("egg.adapter.es")
+
+
+def _current_request_id() -> str | None:
+    """Return the current request_id bound in the structlog contextvars, if any.
+
+    The audit middleware binds ``request_id`` per request; adapter callers
+    inside the same thread can surface it to the backend as ``X-Opaque-Id``
+    without threading the value through every call site.
+    """
+    ctx = structlog.contextvars.get_contextvars()
+    rid = ctx.get("request_id")
+    return rid if isinstance(rid, str) and rid else None
+
+
+def _tracing_headers() -> dict[str, str]:
+    """Build the outgoing header dict for a backend call.
+
+    Elasticsearch honors ``X-Opaque-Id`` natively: it is echoed in slow logs
+    and task-management APIs, which lets operators correlate an EGG request
+    with its downstream ES work.
+    """
+    rid = _current_request_id()
+    return {"X-Opaque-Id": rid} if rid else {}
 
 
 def _record_backend_error(error_code: str) -> None:
@@ -36,6 +62,7 @@ def _parse_major_version(version: str) -> int | None:
     except ValueError:
         return None
 
+
 _TRANSIENT_HTTP_EXCEPTIONS: tuple[type[BaseException], ...] = (
     httpx.TimeoutException,
     httpx.ConnectError,
@@ -43,6 +70,14 @@ _TRANSIENT_HTTP_EXCEPTIONS: tuple[type[BaseException], ...] = (
     httpx.ReadError,
     httpx.WriteError,
 )
+
+
+# Default caps on the retry loop. With retry_backoff_seconds=0.2 and
+# max_retries=2, uncapped exponential would peak at 0.8 s. With higher
+# retries these constants keep the worst case bounded.
+_DEFAULT_RETRY_CAP_SECONDS = 5.0
+_DEFAULT_RETRY_DEADLINE_SECONDS = 30.0
+_JITTER_RATIO = 0.25  # ±25% of the nominal sleep
 
 
 class ElasticsearchAdapter:
@@ -55,12 +90,16 @@ class ElasticsearchAdapter:
         timeout_seconds: float = 15.0,
         max_retries: int = 2,
         retry_backoff_seconds: float = 0.2,
+        retry_backoff_cap_seconds: float = _DEFAULT_RETRY_CAP_SECONDS,
+        retry_deadline_seconds: float = _DEFAULT_RETRY_DEADLINE_SECONDS,
         max_buckets_per_facet: int = 20,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.index = index
         self.max_retries = max(0, int(max_retries))
         self.retry_backoff_seconds = max(0.0, float(retry_backoff_seconds))
+        self.retry_backoff_cap_seconds = max(0.0, float(retry_backoff_cap_seconds))
+        self.retry_deadline_seconds = max(0.0, float(retry_deadline_seconds))
         self.max_buckets_per_facet = max(1, int(max_buckets_per_facet))
         # follow_redirects=False blocks SSRF via backend redirects to untrusted hosts.
         self.client = client or httpx.Client(
@@ -68,13 +107,36 @@ class ElasticsearchAdapter:
             follow_redirects=False,
         )
 
+    def _compute_sleep(self, attempt: int) -> float:
+        """Exponential backoff with jitter, bounded by ``retry_backoff_cap_seconds``.
+
+        ``attempt`` is zero-based for the first retry, so the nominal backoff
+        is ``base * 2**attempt``. Jitter is ±25% uniform to spread retries
+        across parallel callers and avoid synchronized thundering herd.
+        """
+        if self.retry_backoff_seconds <= 0:
+            return 0.0
+        nominal = self.retry_backoff_seconds * (2**attempt)
+        capped = min(nominal, self.retry_backoff_cap_seconds)
+        jitter = capped * _JITTER_RATIO
+        # Non-cryptographic jitter: only spreads retry scheduling across
+        # parallel callers to avoid a thundering herd.
+        return max(0.0, capped + random.uniform(-jitter, jitter))  # noqa: S311
+
     def _request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
         """Issue a request with bounded retries on transient failures/5xx.
 
-        Raises :class:`AppError` ("backend_unavailable", 503) after exhaustion.
+        Retries are capped by ``max_retries`` *and* by ``retry_deadline_seconds``:
+        whichever ceiling hits first terminates the loop. Raises
+        :class:`AppError` ("backend_unavailable", 503) after exhaustion.
         """
         attempts = self.max_retries + 1
         last_exc: BaseException | None = None
+        deadline = (
+            time.monotonic() + self.retry_deadline_seconds
+            if self.retry_deadline_seconds > 0
+            else None
+        )
         for attempt in range(attempts):
             try:
                 response = self.client.request(method, url, **kwargs)
@@ -88,7 +150,9 @@ class ElasticsearchAdapter:
                     url=url,
                     error=str(exc),
                 )
-                if attempt + 1 >= attempts:
+                if attempt + 1 >= attempts or (
+                    deadline is not None and time.monotonic() >= deadline
+                ):
                     _record_backend_error("backend_unavailable")
                     raise AppError(
                         "backend_unavailable",
@@ -96,10 +160,14 @@ class ElasticsearchAdapter:
                         {"reason": str(exc)},
                         503,
                     ) from exc
-                time.sleep(self.retry_backoff_seconds * (2 ** attempt))
+                time.sleep(self._compute_sleep(attempt))
                 continue
 
             if response.status_code >= 500 and attempt + 1 < attempts:
+                if deadline is not None and time.monotonic() >= deadline:
+                    # Overall deadline reached; surface the last 5xx rather
+                    # than retrying into certain timeout.
+                    break
                 logger.warning(
                     "backend_5xx",
                     attempt=attempt + 1,
@@ -108,7 +176,7 @@ class ElasticsearchAdapter:
                     url=url,
                     status_code=response.status_code,
                 )
-                time.sleep(self.retry_backoff_seconds * (2 ** attempt))
+                time.sleep(self._compute_sleep(attempt))
                 continue
             return response
 
@@ -123,7 +191,7 @@ class ElasticsearchAdapter:
     _MIN_SUPPORTED_MAJOR_VERSION = 7
 
     def detect(self) -> dict[str, Any]:
-        response = self._request("GET", f"{self.base_url}")
+        response = self._request("GET", f"{self.base_url}", headers=_tracing_headers())
         try:
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
@@ -150,7 +218,9 @@ class ElasticsearchAdapter:
         return {"detected": True, "version": version_info}
 
     def health(self) -> dict[str, Any]:
-        response = self._request("GET", f"{self.base_url}/_cluster/health")
+        response = self._request(
+            "GET", f"{self.base_url}/_cluster/health", headers=_tracing_headers()
+        )
         try:
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
@@ -166,7 +236,9 @@ class ElasticsearchAdapter:
         return [self.index]
 
     def scan_fields(self) -> dict[str, Any]:
-        response = self._request("GET", f"{self.base_url}/{self.index}/_mapping")
+        response = self._request(
+            "GET", f"{self.base_url}/{self.index}/_mapping", headers=_tracing_headers()
+        )
         response.raise_for_status()
         return response.json()
 
@@ -182,9 +254,7 @@ class ElasticsearchAdapter:
         max_buckets_per_facet: int | None = None,
     ) -> dict[str, Any]:
         bucket_size_default = (
-            self.max_buckets_per_facet
-            if max_buckets_per_facet is None
-            else max_buckets_per_facet
+            self.max_buckets_per_facet if max_buckets_per_facet is None else max_buckets_per_facet
         )
         must: list[dict[str, Any]] = []
         filter_clauses: list[dict[str, Any]] = []
@@ -202,21 +272,21 @@ class ElasticsearchAdapter:
         body: dict[str, Any] = {
             "from": (query.page - 1) * query.page_size,
             "size": size,
-            "query": {
-                "bool": {"must": must or [{"match_all": {}}], "filter": filter_clauses}
-            },
+            "query": {"bool": {"must": must or [{"match_all": {}}], "filter": filter_clauses}},
         }
         if include_aggs and query.facets:
             body["aggs"] = {
-                facet: {"terms": {"field": facet, "size": bucket_size}}
-                for facet in query.facets
+                facet: {"terms": {"field": facet, "size": bucket_size}} for facet in query.facets
             }
         return body
 
     def search(self, query: NormalizedQuery) -> dict[str, Any]:
         payload = self.translate_query(query)
         response = self._request(
-            "POST", f"{self.base_url}/{self.index}/_search", json=payload
+            "POST",
+            f"{self.base_url}/{self.index}/_search",
+            json=payload,
+            headers=_tracing_headers(),
         )
         try:
             response.raise_for_status()
@@ -231,7 +301,9 @@ class ElasticsearchAdapter:
 
     def get_record(self, record_id: str) -> dict[str, Any] | None:
         response = self._request(
-            "GET", f"{self.base_url}/{self.index}/_doc/{record_id}"
+            "GET",
+            f"{self.base_url}/{self.index}/_doc/{record_id}",
+            headers=_tracing_headers(),
         )
         if response.status_code == 404:
             return None
@@ -261,7 +333,10 @@ class ElasticsearchAdapter:
         """Aggregations-only search (size=0) — use for the /v1/facets endpoint."""
         payload = self.translate_query(query, size_override=0)
         response = self._request(
-            "POST", f"{self.base_url}/{self.index}/_search", json=payload
+            "POST",
+            f"{self.base_url}/{self.index}/_search",
+            json=payload,
+            headers=_tracing_headers(),
         )
         try:
             response.raise_for_status()

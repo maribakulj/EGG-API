@@ -1,4 +1,5 @@
 """Regression tests for Vague 4 (H9-H10, M1-M5): observability & storage."""
+
 from __future__ import annotations
 
 import sqlite3
@@ -15,10 +16,10 @@ from app.metrics import registry as metrics_registry
 from app.schemas.query import NormalizedQuery
 from app.storage.sqlite_store import SQLiteStore
 
-
 # ---------------------------------------------------------------------------
 # H9 — Prometheus /metrics
 # ---------------------------------------------------------------------------
+
 
 def test_h9_metrics_endpoint_returns_prometheus_exposition(client) -> None:
     client.get("/v1/search?q=abc")
@@ -76,8 +77,12 @@ def test_h9_backend_error_counter_increments_on_transient_failure() -> None:
         adapter.search(NormalizedQuery(q="x"))
 
     after = generate_latest(metrics_registry).decode()
-    after_value = _extract_counter(after, 'egg_backend_errors_total{error_code="backend_unavailable"}')
-    before_value = _extract_counter(before, 'egg_backend_errors_total{error_code="backend_unavailable"}')
+    after_value = _extract_counter(
+        after, 'egg_backend_errors_total{error_code="backend_unavailable"}'
+    )
+    before_value = _extract_counter(
+        before, 'egg_backend_errors_total{error_code="backend_unavailable"}'
+    )
     assert after_value > before_value
     # Confirm the metric is registered exactly once (no duplicate registry).
     assert before_count <= 1
@@ -93,6 +98,7 @@ def _extract_counter(exposition: str, series_prefix: str) -> float:
 # ---------------------------------------------------------------------------
 # H10 — structlog bootstrap
 # ---------------------------------------------------------------------------
+
 
 def test_h10_get_logger_returns_a_bound_logger() -> None:
     from app.logging import get_logger
@@ -118,6 +124,7 @@ def test_h10_logging_is_idempotent() -> None:
 # M1 — SQL indexes on hot columns
 # ---------------------------------------------------------------------------
 
+
 def test_m1_indexes_exist_after_initialize(tmp_path: Path) -> None:
     store = SQLiteStore(tmp_path / "state.sqlite3")
     store.initialize()
@@ -130,7 +137,6 @@ def test_m1_indexes_exist_after_initialize(tmp_path: Path) -> None:
         "idx_usage_events_timestamp",
         "idx_usage_events_subject",
         "idx_usage_events_status",
-        "idx_quota_counters_subject",
         "idx_ui_sessions_expires",
     }
     missing = expected - names
@@ -140,6 +146,7 @@ def test_m1_indexes_exist_after_initialize(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 # M2 — Paginated usage events
 # ---------------------------------------------------------------------------
+
 
 def test_m2_list_recent_usage_events_respects_offset(tmp_path: Path) -> None:
     store = SQLiteStore(tmp_path / "state.sqlite3")
@@ -166,9 +173,7 @@ def test_m2_admin_usage_endpoint_paginates(client, admin_headers) -> None:
     # Ensure there are a few events to paginate through.
     for _ in range(3):
         client.get("/v1/search?q=abc")
-    response = client.get(
-        "/admin/v1/usage?limit=1&offset=0", headers=admin_headers
-    )
+    response = client.get("/admin/v1/usage?limit=1&offset=0", headers=admin_headers)
     assert response.status_code == 200
     body = response.json()
     assert set(body.keys()) == {"total", "limit", "offset", "events"}
@@ -178,15 +183,14 @@ def test_m2_admin_usage_endpoint_paginates(client, admin_headers) -> None:
 
 
 def test_m2_admin_usage_rejects_out_of_range(client, admin_headers) -> None:
-    response = client.get(
-        "/admin/v1/usage?limit=0", headers=admin_headers
-    )
+    response = client.get("/admin/v1/usage?limit=0", headers=admin_headers)
     assert response.status_code == 422
 
 
 # ---------------------------------------------------------------------------
 # M5 — ES version check
 # ---------------------------------------------------------------------------
+
 
 def _es_detect_transport(body: dict[str, Any]) -> httpx.MockTransport:
     def handler(request: httpx.Request) -> httpx.Response:

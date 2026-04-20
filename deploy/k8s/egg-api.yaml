@@ -1,0 +1,204 @@
+# Example Kubernetes manifests for EGG-API.
+#
+# Ships a Deployment + Service + ConfigMap + Secret shell. Adjust the image
+# tag, namespace and replica count for your cluster. The Deployment uses:
+#   - /v1/livez   for liveness (public, constant body)
+#   - /v1/readyz  for readiness via an admin key stored in the Secret
+#   - non-root `egg` UID 1000 (matches the Dockerfile)
+#   - a PVC for /var/lib/egg/data so SQLite survives pod restarts
+#
+# For horizontal scaling, SQLite is single-writer. See ADR-001; when you
+# cross a single-pod ceiling, migrate the state store (Postgres) before
+# setting replicas > 1.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: egg-api
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: egg-api-secrets
+  namespace: egg-api
+type: Opaque
+stringData:
+  # Rotate this value before any prod launch. 32+ bytes of random hex.
+  EGG_BOOTSTRAP_ADMIN_KEY: "REPLACE_ME"
+  # Optional HMAC pepper for api-key hashes (Sprint 4 S4.6). Leave unset
+  # to keep legacy SHA-256. If you set it, never change it without rotating
+  # every existing key — legacy rows keep validating but only rotation
+  # migrates them onto the pepper.
+  EGG_API_KEY_PEPPER: ""
+  # Optional Bearer token for /metrics (Sprint 1 S1.11). When unset in
+  # production, /metrics requires an admin X-API-Key instead.
+  EGG_METRICS_TOKEN: ""
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: egg-api-config
+  namespace: egg-api
+data:
+  egg.yaml: |
+    backend:
+      type: elasticsearch
+      url: http://elasticsearch.elastic.svc.cluster.local:9200
+      index: records
+      timeout_seconds: 15.0
+      max_retries: 2
+      retry_backoff_seconds: 0.2
+      retry_backoff_cap_seconds: 5.0
+      retry_deadline_seconds: 30.0
+
+    storage:
+      sqlite_path: /var/lib/egg/data/egg_state.sqlite3
+      usage_events_retention_days: 30
+      purge_interval_seconds: 3600
+
+    security_profile: prudent
+
+    auth:
+      public_mode: anonymous_allowed
+      admin_cookie_secure: true
+      admin_cookie_samesite: strict
+      admin_session_ttl_hours: 12
+
+    proxy:
+      # Trust the in-cluster NGINX ingress hop IPs. Adjust to your topology.
+      trusted_proxies:
+        - 10.0.0.0/8
+
+    cors:
+      mode: off
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: egg-api-state
+  namespace: egg-api
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: egg-api
+  namespace: egg-api
+  labels:
+    app.kubernetes.io/name: egg-api
+spec:
+  replicas: 1  # see comment at the top of this file.
+  strategy:
+    type: Recreate  # SQLite cannot share a PVC across writers.
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: egg-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: egg-api
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: /metrics
+        prometheus.io/port: "8000"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: egg-api
+          image: ghcr.io/maribakulj/egg-api:latest  # override per release.
+          imagePullPolicy: IfNotPresent
+          args: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+          env:
+            - name: EGG_ENV
+              value: production
+            - name: EGG_HOME
+              value: /var/lib/egg
+            - name: EGG_CONFIG_PATH
+              value: /var/lib/egg/config/egg.yaml
+            - name: EGG_LOG_LEVEL
+              value: INFO
+            - name: EGG_BOOTSTRAP_ADMIN_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: egg-api-secrets
+                  key: EGG_BOOTSTRAP_ADMIN_KEY
+            - name: EGG_API_KEY_PEPPER
+              valueFrom:
+                secretKeyRef:
+                  name: egg-api-secrets
+                  key: EGG_API_KEY_PEPPER
+                  optional: true
+            - name: EGG_METRICS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: egg-api-secrets
+                  key: EGG_METRICS_TOKEN
+                  optional: true
+          ports:
+            - name: http
+              containerPort: 8000
+          readinessProbe:
+            httpGet:
+              path: /v1/livez
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /v1/livez
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: state
+              mountPath: /var/lib/egg/data
+            - name: config
+              mountPath: /var/lib/egg/config
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: state
+          persistentVolumeClaim:
+            claimName: egg-api-state
+        - name: config
+          configMap:
+            name: egg-api-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: egg-api
+  namespace: egg-api
+  labels:
+    app.kubernetes.io/name: egg-api
+spec:
+  selector:
+    app.kubernetes.io/name: egg-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+  type: ClusterIP

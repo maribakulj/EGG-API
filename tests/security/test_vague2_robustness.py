@@ -1,4 +1,5 @@
 """Regression tests for Vague 2 (H1-H11): backend robustness & perf."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -12,10 +13,10 @@ from app.dependencies import container
 from app.rate_limit.limiter import InMemoryRateLimiter
 from app.schemas.query import NormalizedQuery
 
-
 # ---------------------------------------------------------------------------
 # H1 — /search must not issue a second backend call for facets
 # ---------------------------------------------------------------------------
+
 
 class CountingAdapter:
     """Drop-in replacement for FakeAdapter that counts backend calls."""
@@ -55,7 +56,9 @@ class CountingAdapter:
     @staticmethod
     def extract_facets(payload: dict[str, Any]) -> dict[str, dict[str, int]]:
         aggs = payload.get("aggregations", {}) or {}
-        return {k: {b["key"]: b["doc_count"] for b in v.get("buckets", [])} for k, v in aggs.items()}
+        return {
+            k: {b["key"]: b["doc_count"] for b in v.get("buckets", [])} for k, v in aggs.items()
+        }
 
 
 def test_h1_search_with_facets_issues_single_backend_call(client) -> None:
@@ -84,6 +87,7 @@ def test_h1_search_without_facets_omits_aggregations(client) -> None:
 # H2 — Retry + typed backend errors
 # ---------------------------------------------------------------------------
 
+
 class _FlakyTransport(httpx.BaseTransport):
     def __init__(self, fail_times: int, exc: BaseException) -> None:
         self.fail_times = fail_times
@@ -101,8 +105,11 @@ def test_h2_timeout_is_retried_then_succeeds() -> None:
     transport = _FlakyTransport(fail_times=2, exc=httpx.TimeoutException("slow"))
     client = httpx.Client(transport=transport)
     adapter = ElasticsearchAdapter(
-        "http://es.local", "records", client=client,
-        max_retries=2, retry_backoff_seconds=0,
+        "http://es.local",
+        "records",
+        client=client,
+        max_retries=2,
+        retry_backoff_seconds=0,
     )
     nq = NormalizedQuery(q="x", page=1, page_size=10)
     payload = adapter.search(nq)
@@ -114,8 +121,11 @@ def test_h2_timeout_exhausts_retries_raises_backend_unavailable() -> None:
     transport = _FlakyTransport(fail_times=99, exc=httpx.ConnectError("down"))
     client = httpx.Client(transport=transport)
     adapter = ElasticsearchAdapter(
-        "http://es.local", "records", client=client,
-        max_retries=1, retry_backoff_seconds=0,
+        "http://es.local",
+        "records",
+        client=client,
+        max_retries=1,
+        retry_backoff_seconds=0,
     )
     from app.errors import AppError
 
@@ -141,8 +151,11 @@ def test_h2_5xx_response_is_retried() -> None:
     transport = httpx.MockTransport(handler)
     client = httpx.Client(transport=transport)
     adapter = ElasticsearchAdapter(
-        "http://es.local", "records", client=client,
-        max_retries=2, retry_backoff_seconds=0,
+        "http://es.local",
+        "records",
+        client=client,
+        max_retries=2,
+        retry_backoff_seconds=0,
     )
     adapter.search(NormalizedQuery(q="x"))
     assert call_log["n"] == 3
@@ -151,6 +164,7 @@ def test_h2_5xx_response_is_retried() -> None:
 # ---------------------------------------------------------------------------
 # H3 — max_depth boundary semantics
 # ---------------------------------------------------------------------------
+
 
 def test_h3_requested_depth_at_boundary_is_allowed(client) -> None:
     cfg = container.config_manager.config
@@ -187,6 +201,7 @@ def test_h3_boolean_parser_strips_whitespace_and_case(client) -> None:
 # ---------------------------------------------------------------------------
 # H4 — Cache-Control + ETag + 304
 # ---------------------------------------------------------------------------
+
 
 def test_h4_search_emits_cache_control_and_etag(client) -> None:
     response = client.get("/v1/search?q=abc")
@@ -232,6 +247,7 @@ def test_h4_cache_disabled_omits_headers(client) -> None:
 # H5 — Admin login anti-brute-force
 # ---------------------------------------------------------------------------
 
+
 def test_h5_login_rate_limit_returns_429(client) -> None:
     container.login_rate_limiter = InMemoryRateLimiter(max_requests=2, window_seconds=60)
 
@@ -262,6 +278,7 @@ def test_h5_rate_limit_runs_before_credential_check(client, admin_headers) -> No
 # H11 — follow_redirects disabled on the backend client
 # ---------------------------------------------------------------------------
 
+
 def test_h11_backend_client_does_not_follow_redirects() -> None:
     adapter = ElasticsearchAdapter("http://es.local", "records")
     assert adapter.client.follow_redirects is False
@@ -291,6 +308,7 @@ def test_h11_redirect_is_not_followed_by_adapter() -> None:
 # Adapter helpers
 # ---------------------------------------------------------------------------
 
+
 def test_translate_query_respects_max_buckets_per_facet() -> None:
     adapter = ElasticsearchAdapter("http://es.local", "records")
     nq = NormalizedQuery(q="x", facets=["type"])
@@ -314,6 +332,7 @@ def test_extract_facets_tolerates_missing_aggregations() -> None:
 # ---------------------------------------------------------------------------
 # Compute cache key regression (previously broken due to Pydantic v2)
 # ---------------------------------------------------------------------------
+
 
 def test_policy_cache_key_is_deterministic() -> None:
     cfg = AppConfig()
