@@ -16,6 +16,7 @@ import time
 from typing import Any
 
 import httpx
+import structlog
 
 from app.errors import AppError
 from app.logging import get_logger
@@ -23,6 +24,29 @@ from app.metrics import backend_errors
 from app.schemas.query import NormalizedQuery
 
 logger = get_logger("egg.adapter.es")
+
+
+def _current_request_id() -> str | None:
+    """Return the current request_id bound in the structlog contextvars, if any.
+
+    The audit middleware binds ``request_id`` per request; adapter callers
+    inside the same thread can surface it to the backend as ``X-Opaque-Id``
+    without threading the value through every call site.
+    """
+    ctx = structlog.contextvars.get_contextvars()
+    rid = ctx.get("request_id")
+    return rid if isinstance(rid, str) and rid else None
+
+
+def _tracing_headers() -> dict[str, str]:
+    """Build the outgoing header dict for a backend call.
+
+    Elasticsearch honors ``X-Opaque-Id`` natively: it is echoed in slow logs
+    and task-management APIs, which lets operators correlate an EGG request
+    with its downstream ES work.
+    """
+    rid = _current_request_id()
+    return {"X-Opaque-Id": rid} if rid else {}
 
 
 def _record_backend_error(error_code: str) -> None:
@@ -167,7 +191,7 @@ class ElasticsearchAdapter:
     _MIN_SUPPORTED_MAJOR_VERSION = 7
 
     def detect(self) -> dict[str, Any]:
-        response = self._request("GET", f"{self.base_url}")
+        response = self._request("GET", f"{self.base_url}", headers=_tracing_headers())
         try:
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
@@ -194,7 +218,9 @@ class ElasticsearchAdapter:
         return {"detected": True, "version": version_info}
 
     def health(self) -> dict[str, Any]:
-        response = self._request("GET", f"{self.base_url}/_cluster/health")
+        response = self._request(
+            "GET", f"{self.base_url}/_cluster/health", headers=_tracing_headers()
+        )
         try:
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
@@ -210,7 +236,9 @@ class ElasticsearchAdapter:
         return [self.index]
 
     def scan_fields(self) -> dict[str, Any]:
-        response = self._request("GET", f"{self.base_url}/{self.index}/_mapping")
+        response = self._request(
+            "GET", f"{self.base_url}/{self.index}/_mapping", headers=_tracing_headers()
+        )
         response.raise_for_status()
         return response.json()
 
@@ -254,7 +282,12 @@ class ElasticsearchAdapter:
 
     def search(self, query: NormalizedQuery) -> dict[str, Any]:
         payload = self.translate_query(query)
-        response = self._request("POST", f"{self.base_url}/{self.index}/_search", json=payload)
+        response = self._request(
+            "POST",
+            f"{self.base_url}/{self.index}/_search",
+            json=payload,
+            headers=_tracing_headers(),
+        )
         try:
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
@@ -267,7 +300,11 @@ class ElasticsearchAdapter:
         return response.json()
 
     def get_record(self, record_id: str) -> dict[str, Any] | None:
-        response = self._request("GET", f"{self.base_url}/{self.index}/_doc/{record_id}")
+        response = self._request(
+            "GET",
+            f"{self.base_url}/{self.index}/_doc/{record_id}",
+            headers=_tracing_headers(),
+        )
         if response.status_code == 404:
             return None
         try:
@@ -295,7 +332,12 @@ class ElasticsearchAdapter:
     def get_facets(self, query: NormalizedQuery) -> dict[str, dict[str, int]]:
         """Aggregations-only search (size=0) — use for the /v1/facets endpoint."""
         payload = self.translate_query(query, size_override=0)
-        response = self._request("POST", f"{self.base_url}/{self.index}/_search", json=payload)
+        response = self._request(
+            "POST",
+            f"{self.base_url}/{self.index}/_search",
+            json=payload,
+            headers=_tracing_headers(),
+        )
         try:
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:

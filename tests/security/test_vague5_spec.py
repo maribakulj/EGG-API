@@ -102,18 +102,18 @@ def test_m9_schema_exposes_active_mapping_and_allowlists(client) -> None:
     assert "id" in field_names and "type" in field_names
 
 
-def test_m9_suggest_is_501_with_typed_error_code(client) -> None:
+def test_m9_suggest_no_longer_registered(client) -> None:
+    # Sprint 5 S5.5: retired the 501-stub /v1/suggest. FastAPI's default
+    # 404 now fires instead of our typed not_implemented error, which was
+    # just noise on the public contract.
     response = client.get("/v1/suggest?q=abc")
-    assert response.status_code == 501
-    assert response.json()["error"]["code"] == "not_implemented"
+    assert response.status_code == 404
 
 
-def test_m9_manifest_is_501_with_record_id_context(client) -> None:
+def test_m9_manifest_no_longer_registered(client) -> None:
+    # Sprint 5 S5.5: same treatment for /v1/manifest/{id}.
     response = client.get("/v1/manifest/abc-123")
-    assert response.status_code == 501
-    body = response.json()
-    assert body["error"]["code"] == "not_implemented"
-    assert body["error"]["details"]["record_id"] == "abc-123"
+    assert response.status_code == 404
 
 
 # ---------------------------------------------------------------------------

@@ -30,6 +30,7 @@ class QueryPolicyEngine:
         "sort",
         "facet",
         "include_fields",
+        "format",
         "type",
         "collection",
         "language",

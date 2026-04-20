@@ -1,14 +1,30 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field, model_validator
 
-_VALID_CRITICALITIES = {"required", "recommended", "optional"}
-_VALID_AUTH_MODES = {"anonymous_allowed", "api_key_optional", "api_key_required"}
-_VALID_CORS_MODES = {"off", "allowlist", "wide_open"}
-_VALID_SAMESITE = {"strict", "lax", "none"}
 # Structural public fields that are synthesized by the mapper regardless of
 # the declared mapping block; they always count as "mapped".
 _STRUCTURAL_FIELDS = {"id", "type"}
+
+# Type aliases: drive OpenAPI enums and narrow mypy's view of the value.
+Criticality = Literal["required", "recommended", "optional"]
+PublicAuthMode = Literal["anonymous_allowed", "api_key_optional", "api_key_required"]
+CorsMode = Literal["off", "allowlist", "wide_open"]
+SameSite = Literal["strict", "lax", "none"]
+MappingMode = Literal[
+    "direct",
+    "constant",
+    "split_list",
+    "first_non_empty",
+    "template",
+    "nested_object",
+    "date_parser",
+    "boolean_cast",
+    "url_passthrough",
+]
+BackendType = Literal["elasticsearch"]
 
 
 class SecurityProfile(BaseModel):
@@ -23,7 +39,7 @@ class SecurityProfile(BaseModel):
 
 
 class BackendConfig(BaseModel):
-    type: str = "elasticsearch"
+    type: BackendType = "elasticsearch"
     url: str = "http://localhost:9200"
     index: str = "records"
     timeout_seconds: float = 15.0
@@ -46,12 +62,10 @@ class RateLimitConfig(BaseModel):
 
 
 class AuthConfig(BaseModel):
-    public_mode: str = (
-        "anonymous_allowed"  # anonymous_allowed | api_key_optional | api_key_required
-    )
+    public_mode: PublicAuthMode = "anonymous_allowed"
     bootstrap_admin_key: str = ""
     admin_cookie_secure: bool = True
-    admin_cookie_samesite: str = "strict"
+    admin_cookie_samesite: SameSite = "strict"
     admin_session_ttl_hours: int = 12
 
 
@@ -64,7 +78,7 @@ class ProxyConfig(BaseModel):
 
 
 class CorsConfig(BaseModel):
-    mode: str = "off"  # off | allowlist | wide_open
+    mode: CorsMode = "off"
     allow_origins: list[str] = Field(default_factory=list)
     allow_methods: list[str] = Field(default_factory=lambda: ["GET"])
     allow_headers: list[str] = Field(default_factory=lambda: ["x-api-key", "content-type"])
@@ -79,21 +93,12 @@ class StorageConfig(BaseModel):
 
 class FieldMapping(BaseModel):
     source: str | None = None
-    mode: str = "direct"
+    mode: MappingMode = "direct"
     constant: str | None = None
     sources: list[str] = Field(default_factory=list)
     separator: str = ";"
     template: str | None = None
-    criticality: str = "optional"
-
-    @model_validator(mode="after")
-    def _validate_criticality(self) -> FieldMapping:
-        if self.criticality not in _VALID_CRITICALITIES:
-            raise ValueError(
-                f"criticality must be one of {sorted(_VALID_CRITICALITIES)}; "
-                f"got {self.criticality!r}"
-            )
-        return self
+    criticality: Criticality = "optional"
 
 
 class AppConfig(BaseModel):
@@ -132,35 +137,20 @@ class AppConfig(BaseModel):
 
     @model_validator(mode="after")
     def _validate_cross_references(self) -> AppConfig:
-        # Security profile must exist in the profiles dict.
+        # Security profile must exist in the profiles dict. Pydantic handles
+        # the token-level validation (public_mode, cors.mode, samesite,
+        # criticality, mapping mode) via Literal aliases; this validator
+        # covers the constraints that span multiple fields.
         if self.security_profile not in self.profiles:
             raise ValueError(
                 f"security_profile {self.security_profile!r} is not defined in "
                 f"profiles (known: {sorted(self.profiles)})"
             )
-        # Auth public_mode must be one of the declared values.
-        if self.auth.public_mode not in _VALID_AUTH_MODES:
-            raise ValueError(
-                f"auth.public_mode must be one of {sorted(_VALID_AUTH_MODES)}; "
-                f"got {self.auth.public_mode!r}"
-            )
-        # CORS mode must be a known token.
-        if self.cors.mode not in _VALID_CORS_MODES:
-            raise ValueError(
-                f"cors.mode must be one of {sorted(_VALID_CORS_MODES)}; got {self.cors.mode!r}"
-            )
-        # Cookie SameSite must be a known token.
-        samesite = (self.auth.admin_cookie_samesite or "").lower()
-        if samesite not in _VALID_SAMESITE:
-            raise ValueError(
-                f"auth.admin_cookie_samesite must be one of {sorted(_VALID_SAMESITE)}; "
-                f"got {self.auth.admin_cookie_samesite!r}"
-            )
         # Browsers ignore `SameSite=None` unless the cookie is also marked
         # Secure. Accepting the combination `none` + secure=false silently
         # leaves the admin session cookie unusable in real browsers — refuse
         # it up-front so the operator finds out at config-load time.
-        if samesite == "none" and not self.auth.admin_cookie_secure:
+        if self.auth.admin_cookie_samesite == "none" and not self.auth.admin_cookie_secure:
             raise ValueError(
                 "auth.admin_cookie_samesite='none' requires admin_cookie_secure=true; "
                 "set both or pick 'lax'/'strict'"

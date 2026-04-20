@@ -53,6 +53,19 @@ class Timestamps(BaseModel):
 
 
 class Record(BaseModel):
+    """Public record shape.
+
+    The defaults are empty collections / None: only the keys the operator has
+    explicitly wired through ``mapping`` (see :mod:`app.mappers.schema_mapper`)
+    carry values on the wire. ``raw_identifiers`` was dropped in Sprint 5 —
+    ``identifiers`` already covers the same ground more descriptively.
+
+    List/dict fields (``contributors``, ``media``, ``keywords``…) can be
+    populated today via ``split_list`` / ``first_non_empty`` / ``nested_object``
+    mapping rules; the schema keeps them documented so clients can read a
+    stable shape even when a given deployment only fills a subset.
+    """
+
     id: str
     type: str
     title: str | None = None
@@ -71,7 +84,6 @@ class Record(BaseModel):
     media: list[dict[str, Any]] = Field(default_factory=list)
     rights: RightsInfo = Field(default_factory=RightsInfo)
     availability: Availability = Field(default_factory=Availability)
-    raw_identifiers: list[str] = Field(default_factory=list)
     raw_fields: dict[str, Any] | None = None
     timestamps: Timestamps = Field(default_factory=Timestamps)
 

@@ -260,7 +260,11 @@ async def config_update(request: Request):
         cfg.backend.url = data.get("backend_url", "").strip()
         cfg.backend.index = data.get("backend_index", "").strip()
         cfg.security_profile = data.get("security_profile", "")
-        cfg.auth.public_mode = data.get("public_mode", "")
+        # `public_mode` is a Literal on the model; the actual value is
+        # validated below via model_validate, so the mypy-visible assignment
+        # is intentionally broadened — invalid strings still surface as a
+        # user-visible error.
+        cfg.auth.public_mode = data.get("public_mode", "")  # type: ignore[assignment]
         cfg.storage.sqlite_path = data.get("sqlite_path", "").strip()
 
         if cfg.security_profile not in cfg.profiles:
