@@ -51,6 +51,8 @@ class Container:
             timeout_seconds=config.backend.timeout_seconds,
             max_retries=config.backend.max_retries,
             retry_backoff_seconds=config.backend.retry_backoff_seconds,
+            retry_backoff_cap_seconds=config.backend.retry_backoff_cap_seconds,
+            retry_deadline_seconds=config.backend.retry_deadline_seconds,
             max_buckets_per_facet=config.profiles[config.security_profile].max_buckets_per_facet,
         )
 
@@ -78,6 +80,8 @@ class Container:
                 timeout_seconds=config.backend.timeout_seconds,
                 max_retries=config.backend.max_retries,
                 retry_backoff_seconds=config.backend.retry_backoff_seconds,
+                retry_backoff_cap_seconds=config.backend.retry_backoff_cap_seconds,
+                retry_deadline_seconds=config.backend.retry_deadline_seconds,
                 max_buckets_per_facet=config.profiles[
                     config.security_profile
                 ].max_buckets_per_facet,

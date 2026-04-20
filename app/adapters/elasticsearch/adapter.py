@@ -11,6 +11,7 @@ gating blocks Elasticsearch < 7.
 
 from __future__ import annotations
 
+import random
 import time
 from typing import Any
 
@@ -47,6 +48,14 @@ _TRANSIENT_HTTP_EXCEPTIONS: tuple[type[BaseException], ...] = (
 )
 
 
+# Default caps on the retry loop. With retry_backoff_seconds=0.2 and
+# max_retries=2, uncapped exponential would peak at 0.8 s. With higher
+# retries these constants keep the worst case bounded.
+_DEFAULT_RETRY_CAP_SECONDS = 5.0
+_DEFAULT_RETRY_DEADLINE_SECONDS = 30.0
+_JITTER_RATIO = 0.25  # ±25% of the nominal sleep
+
+
 class ElasticsearchAdapter:
     def __init__(
         self,
@@ -57,12 +66,16 @@ class ElasticsearchAdapter:
         timeout_seconds: float = 15.0,
         max_retries: int = 2,
         retry_backoff_seconds: float = 0.2,
+        retry_backoff_cap_seconds: float = _DEFAULT_RETRY_CAP_SECONDS,
+        retry_deadline_seconds: float = _DEFAULT_RETRY_DEADLINE_SECONDS,
         max_buckets_per_facet: int = 20,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.index = index
         self.max_retries = max(0, int(max_retries))
         self.retry_backoff_seconds = max(0.0, float(retry_backoff_seconds))
+        self.retry_backoff_cap_seconds = max(0.0, float(retry_backoff_cap_seconds))
+        self.retry_deadline_seconds = max(0.0, float(retry_deadline_seconds))
         self.max_buckets_per_facet = max(1, int(max_buckets_per_facet))
         # follow_redirects=False blocks SSRF via backend redirects to untrusted hosts.
         self.client = client or httpx.Client(
@@ -70,13 +83,36 @@ class ElasticsearchAdapter:
             follow_redirects=False,
         )
 
+    def _compute_sleep(self, attempt: int) -> float:
+        """Exponential backoff with jitter, bounded by ``retry_backoff_cap_seconds``.
+
+        ``attempt`` is zero-based for the first retry, so the nominal backoff
+        is ``base * 2**attempt``. Jitter is ±25% uniform to spread retries
+        across parallel callers and avoid synchronized thundering herd.
+        """
+        if self.retry_backoff_seconds <= 0:
+            return 0.0
+        nominal = self.retry_backoff_seconds * (2**attempt)
+        capped = min(nominal, self.retry_backoff_cap_seconds)
+        jitter = capped * _JITTER_RATIO
+        # Non-cryptographic jitter: only spreads retry scheduling across
+        # parallel callers to avoid a thundering herd.
+        return max(0.0, capped + random.uniform(-jitter, jitter))  # noqa: S311
+
     def _request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
         """Issue a request with bounded retries on transient failures/5xx.
 
-        Raises :class:`AppError` ("backend_unavailable", 503) after exhaustion.
+        Retries are capped by ``max_retries`` *and* by ``retry_deadline_seconds``:
+        whichever ceiling hits first terminates the loop. Raises
+        :class:`AppError` ("backend_unavailable", 503) after exhaustion.
         """
         attempts = self.max_retries + 1
         last_exc: BaseException | None = None
+        deadline = (
+            time.monotonic() + self.retry_deadline_seconds
+            if self.retry_deadline_seconds > 0
+            else None
+        )
         for attempt in range(attempts):
             try:
                 response = self.client.request(method, url, **kwargs)
@@ -90,7 +126,9 @@ class ElasticsearchAdapter:
                     url=url,
                     error=str(exc),
                 )
-                if attempt + 1 >= attempts:
+                if attempt + 1 >= attempts or (
+                    deadline is not None and time.monotonic() >= deadline
+                ):
                     _record_backend_error("backend_unavailable")
                     raise AppError(
                         "backend_unavailable",
@@ -98,10 +136,14 @@ class ElasticsearchAdapter:
                         {"reason": str(exc)},
                         503,
                     ) from exc
-                time.sleep(self.retry_backoff_seconds * (2**attempt))
+                time.sleep(self._compute_sleep(attempt))
                 continue
 
             if response.status_code >= 500 and attempt + 1 < attempts:
+                if deadline is not None and time.monotonic() >= deadline:
+                    # Overall deadline reached; surface the last 5xx rather
+                    # than retrying into certain timeout.
+                    break
                 logger.warning(
                     "backend_5xx",
                     attempt=attempt + 1,
@@ -110,7 +152,7 @@ class ElasticsearchAdapter:
                     url=url,
                     status_code=response.status_code,
                 )
-                time.sleep(self.retry_backoff_seconds * (2**attempt))
+                time.sleep(self._compute_sleep(attempt))
                 continue
             return response
 

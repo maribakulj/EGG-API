@@ -29,6 +29,8 @@ class BackendConfig(BaseModel):
     timeout_seconds: float = 15.0
     max_retries: int = 2
     retry_backoff_seconds: float = 0.2
+    retry_backoff_cap_seconds: float = 5.0
+    retry_deadline_seconds: float = 30.0
 
 
 class CacheConfig(BaseModel):

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import secrets
 import sqlite3
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -30,14 +32,47 @@ class UsageEvent:
 
 
 class SQLiteStore:
+    """Thread-local SQLite store.
+
+    Each OS thread keeps its own persistent ``sqlite3.Connection`` keyed by
+    ``db_path``; FastAPI's sync routes (which run in a threadpool) reuse the
+    same connection across calls. WAL journaling lets multiple threads
+    read/write concurrently. Connections are opened with
+    ``check_same_thread=False`` on the instance but the thread-local pool
+    guarantees no connection is used from two threads at once.
+    """
+
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._local = threading.local()
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
+        # Reuse the thread's connection when it points at the same DB file;
+        # re-open it if the store was pointed at a different path (typical in
+        # tests that swap the underlying file between fixtures).
+        cached = getattr(self._local, "conn", None)
+        cached_path = getattr(self._local, "db_path", None)
+        if cached is not None and cached_path == self.db_path:
+            return cached
+        if cached is not None:
+            with contextlib.suppress(sqlite3.Error):
+                cached.close()
+        conn = sqlite3.connect(self.db_path, check_same_thread=False)
         conn.row_factory = sqlite3.Row
+        self._local.conn = conn
+        self._local.db_path = self.db_path
         return conn
+
+    def close(self) -> None:
+        """Close the current thread's cached connection, if any."""
+        cached = getattr(self._local, "conn", None)
+        if cached is not None:
+            try:
+                cached.close()
+            finally:
+                self._local.conn = None
+                self._local.db_path = None
 
     def initialize(self) -> None:
         with self._connect() as conn:

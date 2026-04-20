@@ -9,6 +9,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from app.admin_api.routes import router as admin_router
@@ -139,10 +140,17 @@ async def usage_audit_middleware(request: Request, call_next):
     finally:
         # Never log the raw API key. Resolve it to the key_id (public label);
         # fall back to the client IP for anonymous or invalid-key traffic.
+        # SQLite lookup is off-loaded to the threadpool so this middleware
+        # never blocks the event loop (the rest of the app is FastAPI sync
+        # routes which are already threadpool-scheduled).
         raw_key = request.headers.get("x-api-key")
         resolved_key_id: str | None = None
         if raw_key:
-            identity = container.api_keys.get_identity(raw_key)
+            try:
+                identity = await run_in_threadpool(container.api_keys.get_identity, raw_key)
+            except Exception:
+                identity = None
+                logger.exception("usage_audit_identity_lookup_failed")
             if identity is not None:
                 resolved_key_id = identity.key_id
 
@@ -175,15 +183,16 @@ async def usage_audit_middleware(request: Request, call_next):
         )
 
         try:
-            container.store.log_usage_event(
-                request_id=request_id,
-                endpoint=endpoint,
-                method=request.method,
-                status_code=status_code,
-                api_key_id=resolved_key_id,
-                subject=str(subject),
-                latency_ms=latency_ms,
-                error_code=error_code,
+            await run_in_threadpool(
+                container.store.log_usage_event,
+                request_id,
+                endpoint,
+                request.method,
+                status_code,
+                resolved_key_id,
+                str(subject),
+                latency_ms,
+                error_code,
             )
         except Exception:
             # Storage failure must not hide the original response/exception.
