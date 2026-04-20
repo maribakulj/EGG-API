@@ -5,6 +5,7 @@
 {% if error %}<p class="error">{{ error }}</p>{% endif %}
 
 <form method="post" action="/admin/ui/keys/create" class="inline-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
   <label>Key label <input name="key_id" required /></label>
   <button type="submit">Create API key</button>
 </form>
@@ -27,9 +28,14 @@
       <td>{{ key.last_used_at or '-' }}</td>
       <td>
         <form class="inline-form" method="post" action="/admin/ui/keys/{{ key.key_id }}/status">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
           <button name="action" value="activate" type="submit">Activate</button>
           <button name="action" value="suspend" type="submit">Suspend</button>
           <button name="action" value="revoke" type="submit">Revoke</button>
+        </form>
+        <form class="inline-form" method="post" action="/admin/ui/keys/{{ key.key_id }}/rotate">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <button type="submit" title="Generate a new secret and revoke the old one">Rotate</button>
         </form>
       </td>
     </tr>

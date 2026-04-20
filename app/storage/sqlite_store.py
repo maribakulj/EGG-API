@@ -167,17 +167,49 @@ class SQLiteStore:
             ).fetchall()
         return [ApiKeyRecord(**dict(row)) for row in rows]
 
-    def set_key_status(self, secret_or_key_id: str, status: str) -> bool:
+    def set_key_status_by_key_id(self, key_id: str, status: str) -> bool:
+        """Flip the status row identified by its public label."""
         with self._connect() as conn:
             cur = conn.execute(
-                """
-                UPDATE api_keys
-                SET status = ?
-                WHERE key_hash = ? OR key_id = ?
-                """,
-                (status, self._hash_key(secret_or_key_id), secret_or_key_id),
+                "UPDATE api_keys SET status = ? WHERE key_id = ?",
+                (status, key_id),
             )
         return cur.rowcount > 0
+
+    def set_key_status_by_secret(self, secret: str, status: str) -> bool:
+        """Flip the status row identified by its raw key value (hashed for lookup)."""
+        with self._connect() as conn:
+            cur = conn.execute(
+                "UPDATE api_keys SET status = ? WHERE key_hash = ?",
+                (status, self._hash_key(secret)),
+            )
+        return cur.rowcount > 0
+
+    def rotate_api_key(self, key_id: str) -> str | None:
+        """Generate a fresh secret for ``key_id`` and replace the stored hash.
+
+        Returns the new raw secret (only time it is ever disclosed), or None
+        when the key_id is unknown.
+        """
+        new_secret = secrets.token_urlsafe(24)
+        with self._connect() as conn:
+            cur = conn.execute(
+                "UPDATE api_keys SET key_hash = ?, prefix = ?, status = 'active' WHERE key_id = ?",
+                (self._hash_key(new_secret), new_secret[:8], key_id),
+            )
+            if cur.rowcount == 0:
+                return None
+        return new_secret
+
+    def set_key_status(self, secret_or_key_id: str, status: str) -> bool:
+        """Legacy shim: try key_id first, fall back to secret.
+
+        Prefer :meth:`set_key_status_by_key_id` or :meth:`set_key_status_by_secret`
+        in new code to avoid SQL clauses that match on either column at once.
+        """
+        if self.set_key_status_by_key_id(secret_or_key_id, status):
+            return True
+        return self.set_key_status_by_secret(secret_or_key_id, status)
 
     def validate_api_key(self, secret: str | None) -> ApiKeyRecord | None:
         if not secret:
@@ -213,7 +245,8 @@ class SQLiteStore:
         expires_at = (now + timedelta(hours=max(1, int(ttl_hours)))).isoformat()
         with self._connect() as conn:
             conn.execute(
-                "INSERT INTO ui_sessions(token, key_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
+                "INSERT INTO ui_sessions(token, key_id, created_at, expires_at) "
+                "VALUES (?, ?, ?, ?)",
                 (token_hash, key_id, now.isoformat(), expires_at),
             )
         return token
@@ -225,7 +258,8 @@ class SQLiteStore:
         now_iso = datetime.now(timezone.utc).isoformat()
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT key_id, expires_at FROM ui_sessions WHERE token = ?", (token_hash,)
+                "SELECT key_id, expires_at FROM ui_sessions WHERE token = ?",
+                (token_hash,),
             ).fetchone()
             if not row:
                 return None
@@ -234,6 +268,11 @@ class SQLiteStore:
                 conn.execute("DELETE FROM ui_sessions WHERE token = ?", (token_hash,))
                 return None
         return str(row["key_id"])
+
+    def invalidate_sessions_for_key_id(self, key_id: str) -> int:
+        with self._connect() as conn:
+            cur = conn.execute("DELETE FROM ui_sessions WHERE key_id = ?", (key_id,))
+        return int(cur.rowcount or 0)
 
     def delete_ui_session(self, token: str | None) -> None:
         if not token:

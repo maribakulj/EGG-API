@@ -105,3 +105,24 @@ def client() -> TestClient:
 @pytest.fixture()
 def admin_headers() -> dict[str, str]:
     return {"x-api-key": container.api_keys.default_admin_key}
+
+
+@pytest.fixture()
+def admin_ui_session(client: TestClient, admin_headers: dict[str, str]) -> str:
+    """Log in through the admin UI and return the CSRF token for POSTs.
+
+    All state-changing UI handlers require ``csrf_token`` (form field or
+    ``X-CSRF-Token`` header). Tests that exercise those endpoints should
+    submit the returned value.
+    """
+    from app.admin_ui.auth import _csrf_for_session
+
+    response = client.post(
+        "/admin/login",
+        data={"api_key": admin_headers["x-api-key"]},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    session_token = client.cookies.get("egg_admin_session")
+    assert session_token, "login should set the session cookie"
+    return _csrf_for_session(session_token)

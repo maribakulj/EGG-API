@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field, model_validator
 _VALID_CRITICALITIES = {"required", "recommended", "optional"}
 _VALID_AUTH_MODES = {"anonymous_allowed", "api_key_optional", "api_key_required"}
 _VALID_CORS_MODES = {"off", "allowlist", "wide_open"}
+_VALID_SAMESITE = {"strict", "lax", "none"}
 # Structural public fields that are synthesized by the mapper regardless of
 # the declared mapping block; they always count as "mapped".
 _STRUCTURAL_FIELDS = {"id", "type"}
@@ -52,6 +53,14 @@ class AuthConfig(BaseModel):
     admin_session_ttl_hours: int = 12
 
 
+class ProxyConfig(BaseModel):
+    # Trust X-Forwarded-* / Forwarded headers only from explicit hop IPs.
+    # Leave empty (the default) to disable proxy-header rewriting entirely;
+    # set to ["*"] only when the service is guaranteed to be reachable solely
+    # through the reverse proxy. Accepts individual IPs or CIDR-like strings.
+    trusted_proxies: list[str] = Field(default_factory=list)
+
+
 class CorsConfig(BaseModel):
     mode: str = "off"  # off | allowlist | wide_open
     allow_origins: list[str] = Field(default_factory=list)
@@ -93,6 +102,7 @@ class AppConfig(BaseModel):
         }
     )
     auth: AuthConfig = Field(default_factory=AuthConfig)
+    proxy: ProxyConfig = Field(default_factory=ProxyConfig)
     cors: CorsConfig = Field(default_factory=CorsConfig)
     cache: CacheConfig = Field(default_factory=CacheConfig)
     rate_limit: RateLimitConfig = Field(default_factory=RateLimitConfig)
@@ -133,6 +143,22 @@ class AppConfig(BaseModel):
         if self.cors.mode not in _VALID_CORS_MODES:
             raise ValueError(
                 f"cors.mode must be one of {sorted(_VALID_CORS_MODES)}; got {self.cors.mode!r}"
+            )
+        # Cookie SameSite must be a known token.
+        samesite = (self.auth.admin_cookie_samesite or "").lower()
+        if samesite not in _VALID_SAMESITE:
+            raise ValueError(
+                f"auth.admin_cookie_samesite must be one of {sorted(_VALID_SAMESITE)}; "
+                f"got {self.auth.admin_cookie_samesite!r}"
+            )
+        # Browsers ignore `SameSite=None` unless the cookie is also marked
+        # Secure. Accepting the combination `none` + secure=false silently
+        # leaves the admin session cookie unusable in real browsers — refuse
+        # it up-front so the operator finds out at config-load time.
+        if samesite == "none" and not self.auth.admin_cookie_secure:
+            raise ValueError(
+                "auth.admin_cookie_samesite='none' requires admin_cookie_secure=true; "
+                "set both or pick 'lax'/'strict'"
             )
         # Every allowed_include_field must either be a structural field or be
         # explicitly declared in the mapping block — otherwise the API surface

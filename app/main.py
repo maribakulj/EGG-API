@@ -9,6 +9,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from app.admin_api.routes import router as admin_router
 from app.admin_ui.routes import router as admin_ui_router
@@ -40,6 +41,16 @@ app = FastAPI(
     redoc_url=None if _PROD else "/redoc",
     openapi_url=None if _PROD else "/openapi.json",
 )
+
+# Rewrite request.client.host and request.url.scheme from X-Forwarded-* when
+# the request arrives from a configured trusted hop. Without this, every
+# client behind the reverse proxy shares the proxy's IP for rate-limiting
+# and audit logs.
+_trusted = container.config_manager.config.proxy.trusted_proxies
+if _trusted:
+    trusted_hosts = "*" if _trusted == ["*"] else ",".join(_trusted)
+    app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=trusted_hosts)
+
 app.include_router(public_router)
 app.include_router(admin_router)
 app.include_router(admin_ui_router)

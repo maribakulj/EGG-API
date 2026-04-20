@@ -79,39 +79,29 @@ def test_h6_templates_env_autoescape_enabled() -> None:
         "<script>",
     ],
 )
-def test_h7_create_key_rejects_invalid_label(bad_label: str, client, admin_headers) -> None:
-    client.post(
-        "/admin/login",
-        data={"api_key": admin_headers["x-api-key"]},
-        follow_redirects=False,
+def test_h7_create_key_rejects_invalid_label(bad_label: str, client, admin_ui_session) -> None:
+    response = client.post(
+        "/admin/ui/keys/create",
+        data={"key_id": bad_label, "csrf_token": admin_ui_session},
     )
-    response = client.post("/admin/ui/keys/create", data={"key_id": bad_label})
     assert response.status_code == 400
     assert "must be 1-64 characters" in response.text
 
 
 @pytest.mark.parametrize("label", ["abc", "team-01", "svc.prod", "api_key_1"])
-def test_h7_create_key_accepts_valid_labels(label: str, client, admin_headers) -> None:
-    client.post(
-        "/admin/login",
-        data={"api_key": admin_headers["x-api-key"]},
-        follow_redirects=False,
+def test_h7_create_key_accepts_valid_labels(label: str, client, admin_ui_session) -> None:
+    response = client.post(
+        "/admin/ui/keys/create",
+        data={"key_id": label, "csrf_token": admin_ui_session},
     )
-    response = client.post("/admin/ui/keys/create", data={"key_id": label})
     assert response.status_code == 200
     assert "Copy it now" in response.text
 
 
-def test_h7_status_action_rejects_invalid_path_param(client, admin_headers) -> None:
-    client.post(
-        "/admin/login",
-        data={"api_key": admin_headers["x-api-key"]},
-        follow_redirects=False,
-    )
-    # Invalid characters in path -> redirect without side-effects.
+def test_h7_status_action_rejects_invalid_path_param(client, admin_ui_session) -> None:
     response = client.post(
         "/admin/ui/keys/bad%20id/status",
-        data={"action": "revoke"},
+        data={"action": "revoke", "csrf_token": admin_ui_session},
         follow_redirects=False,
     )
     assert response.status_code == 303

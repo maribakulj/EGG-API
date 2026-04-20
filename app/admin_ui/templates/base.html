@@ -21,7 +21,14 @@
     <a href="/admin/ui/mapping">Mapping</a>
     <a href="/admin/ui/keys">API keys</a>
     <a href="/admin/ui/usage">Recent activity</a>
-    <form action="/admin/logout" method="post" class="inline-form"><button type="submit">Sign out</button></form>
+    <form action="/admin/logout" method="post" class="inline-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <button type="submit">Sign out</button>
+    </form>
+    <form action="/admin/logout-everywhere" method="post" class="inline-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <button type="submit" title="Revoke every active admin session">Sign out everywhere</button>
+    </form>
   </nav>
   {% endif %}
 
