@@ -60,6 +60,24 @@ def test_query(request: Request) -> dict[str, object]:
     return {"translated": container.adapter.translate_query(nq)}
 
 
+@router.get("/debug/translate")
+def debug_translate(request: Request) -> dict[str, object]:
+    """Inspect how a query string would be parsed and translated.
+
+    Mirrors ``/admin/v1/test-query`` but accepts the same GET query-string
+    an operator would actually reproduce (``/v1/search?q=…``). Returns the
+    normalized query, the ETag cache key, and the backend DSL the adapter
+    would send — without touching the backend. Useful when a caller
+    reports unexpected results and you want to eyeball the pipeline.
+    """
+    nq = container.policy.parse(request)
+    return {
+        "normalized": nq.model_dump(mode="python"),
+        "cache_key": container.policy.compute_cache_key(nq),
+        "translated": container.adapter.translate_query(nq),
+    }
+
+
 @router.get("/usage")
 def usage_events(
     limit: int = Query(100, ge=1, le=1000),

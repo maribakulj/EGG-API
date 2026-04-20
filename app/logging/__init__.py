@@ -32,12 +32,19 @@ def configure(level: str | int | None = None) -> None:
         else getattr(logging, str(log_level_name).upper(), logging.INFO)
     )
 
+    # Local import: app.tracing depends on app.logging at import time
+    # (it calls get_logger). Deferring the import avoids the circular chain.
+    from app.tracing import structlog_tracing_processor
+
     shared_processors: list = [
         structlog.contextvars.merge_contextvars,
         structlog.processors.add_log_level,
         structlog.processors.TimeStamper(fmt="iso", utc=True),
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
+        # OTel-aware: injects trace_id/span_id when configure_tracing() ran.
+        # No-op otherwise; safe to include unconditionally.
+        structlog_tracing_processor,
     ]
 
     structlog.configure(

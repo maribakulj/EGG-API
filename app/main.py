@@ -28,6 +28,7 @@ from app.metrics import (
 )
 from app.public_api.routes import router as public_router
 from app.runtime_paths import is_production
+from app.tracing import configure_tracing
 
 configure_logging()
 logger = structlog.get_logger("egg.http")
@@ -128,6 +129,11 @@ _trusted = container.config_manager.config.proxy.trusted_proxies
 if _trusted:
     trusted_hosts = "*" if _trusted == ["*"] else ",".join(_trusted)
     app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=trusted_hosts)
+
+# Wire OpenTelemetry traces/spans if configured. No-op when neither
+# EGG_OTEL_ENDPOINT nor OTEL_EXPORTER_OTLP_ENDPOINT is set. Must run before
+# the routers are attached so the instrumentation sees every endpoint.
+configure_tracing(app)
 
 app.include_router(public_router)
 app.include_router(admin_router)
@@ -230,6 +236,10 @@ async def usage_audit_middleware(request: Request, call_next):
                 logger.exception("usage_audit_identity_lookup_failed")
             if identity is not None:
                 resolved_key_id = identity.key_id
+                # Propagate the public key_id into the structlog context so
+                # anything logged for the remainder of the request carries
+                # it (adapter calls, purge tick, handler exceptions…).
+                structlog.contextvars.bind_contextvars(key_id=resolved_key_id)
 
         client_host = request.client.host if request.client else "anonymous"
         subject = resolved_key_id or client_host

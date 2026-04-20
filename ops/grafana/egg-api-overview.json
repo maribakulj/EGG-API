@@ -1,0 +1,120 @@
+{
+  "annotations": { "list": [] },
+  "description": "Single-pane dashboard for EGG-API: traffic, latency, backend health, rate-limit hits. Imports into Grafana 10+.",
+  "editable": true,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Request rate (req/s) by status class",
+      "targets": [
+        {
+          "expr": "sum by (status) (rate(egg_requests_total[1m]))",
+          "legendFormat": "{{status}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 }
+    },
+    {
+      "type": "timeseries",
+      "title": "p50 / p95 / p99 latency (s) — public API",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(egg_request_duration_seconds_bucket{endpoint=~\"/v1/.*\"}[5m])))",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(egg_request_duration_seconds_bucket{endpoint=~\"/v1/.*\"}[5m])))",
+          "legendFormat": "p95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(egg_request_duration_seconds_bucket{endpoint=~\"/v1/.*\"}[5m])))",
+          "legendFormat": "p99"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Latency per endpoint (p95, s)",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, endpoint) (rate(egg_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "{{endpoint}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Backend error rate (req/s) by code",
+      "targets": [
+        {
+          "expr": "sum by (error_code) (rate(egg_backend_errors_total[1m]))",
+          "legendFormat": "{{error_code}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Rate-limit hits (429) by scope",
+      "targets": [
+        {
+          "expr": "sum by (scope) (rate(egg_rate_limit_hits_total[1m]))",
+          "legendFormat": "{{scope}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "gridPos": { "x": 0, "y": 16, "w": 12, "h": 8 }
+    },
+    {
+      "type": "stat",
+      "title": "Error budget burn (5xx share, last 1h)",
+      "targets": [
+        {
+          "expr": "sum(rate(egg_requests_total{status=~\"5..\"}[1h])) / clamp_min(sum(rate(egg_requests_total[1h])), 1)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.01 },
+              { "color": "red", "value": 0.05 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "x": 12, "y": 16, "w": 6, "h": 8 }
+    },
+    {
+      "type": "stat",
+      "title": "Up (scrape)",
+      "targets": [{ "expr": "up{job=\"egg-api\"}" }],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "options": { "0": { "text": "DOWN", "color": "red" } }, "type": "value" },
+            { "options": { "1": { "text": "UP", "color": "green" } }, "type": "value" }
+          ]
+        }
+      },
+      "gridPos": { "x": 18, "y": 16, "w": 6, "h": 8 }
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "tags": ["egg-api", "glam"],
+  "templating": { "list": [] },
+  "time": { "from": "now-6h", "to": "now" },
+  "title": "EGG-API — Overview",
+  "version": 1
+}

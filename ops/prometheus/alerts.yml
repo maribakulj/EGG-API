@@ -1,0 +1,131 @@
+# EGG-API Prometheus alerting rules.
+#
+# Load via `rule_files:` in the Prometheus config. The expressions target the
+# counters + histograms exposed by `app/metrics/__init__.py`:
+#   egg_requests_total{endpoint,method,status}
+#   egg_request_duration_seconds_bucket{endpoint,method}
+#   egg_backend_errors_total{error_code}
+#   egg_rate_limit_hits_total{scope}
+#
+# Severities follow the "page / ticket" convention: `critical` wakes on-call,
+# `warning` opens a ticket during business hours.
+
+groups:
+  - name: egg-api.availability
+    interval: 30s
+    rules:
+      - alert: EGGApiDown
+        # The /metrics scrape itself is the canary — `up` drops to 0 when
+        # Prometheus can't reach the service for two consecutive intervals.
+        expr: up{job="egg-api"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "EGG-API instance {{ $labels.instance }} is not scraping"
+          description: |
+            Prometheus has failed to scrape /metrics for 2+ minutes. Check the
+            container logs and `egg-api check-backend` on the host.
+
+      - alert: EGGApiHighErrorRate
+        # 5xx share > 5% of total traffic over the last 5 min.
+        expr: |
+          (
+            sum(rate(egg_requests_total{status=~"5.."}[5m]))
+            / clamp_min(sum(rate(egg_requests_total[5m])), 1)
+          ) > 0.05
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "5xx rate > 5% for 10 min"
+          description: |
+            Investigate the structured logs for `event=request status_code=5*`.
+            Common causes: backend (ES) outage, storage failure, unhandled
+            exception regression.
+
+  - name: egg-api.latency
+    interval: 30s
+    rules:
+      - alert: EGGApiP99Slow
+        # p99 latency over the public API > 1 s for 10 min.
+        expr: |
+          histogram_quantile(
+            0.99,
+            sum by (le, endpoint) (
+              rate(egg_request_duration_seconds_bucket{endpoint=~"/v1/.*"}[5m])
+            )
+          ) > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "p99 latency > 1s on {{ $labels.endpoint }}"
+          description: |
+            Check backend health (`/v1/readyz` with admin key) and the
+            egg_backend_errors_total counter. See RUNBOOK §slow-backend.
+
+  - name: egg-api.backend
+    interval: 30s
+    rules:
+      - alert: EGGBackendUnavailable
+        # Any sustained rate of backend_unavailable errors is worth paging.
+        expr: |
+          sum(rate(egg_backend_errors_total{error_code="backend_unavailable"}[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Elasticsearch unreachable (backend_unavailable > 0.1/s)"
+          description: |
+            The adapter's retry loop is exhausting attempts. Check ES
+            cluster state, the `backend.url` config, and firewall/egress
+            rules. See RUNBOOK §es-outage.
+
+      - alert: EGGBackendVersionUnsupported
+        expr: increase(egg_backend_errors_total{error_code="unsupported_backend_version"}[15m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Backend version below supported floor"
+          description: |
+            Minimum major is 7 (see adapter._MIN_SUPPORTED_MAJOR_VERSION).
+            Either upgrade the backend or pin a compatible EGG-API version.
+
+  - name: egg-api.rate-limit
+    interval: 30s
+    rules:
+      - alert: EGGRateLimitBurst
+        # A sudden spike of 429s usually means either a misbehaving client or
+        # an under-provisioned quota. Both are operator concerns.
+        expr: |
+          sum(rate(egg_rate_limit_hits_total[5m])) > 5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Rate-limit rejecting > 5 req/s for 10 min"
+          description: |
+            Identify the offending subject (`api_key_id` / `ip:*`) in the
+            usage_events log and raise the per-key quota if the traffic is
+            legitimate.
+
+  - name: egg-api.purge
+    interval: 1m
+    rules:
+      - alert: EGGRetentionStalled
+        # Background purge updates last_purge.last_run_at (unix timestamp)
+        # through /admin/v1/storage/stats; no direct Prom metric today, so
+        # this alert is a placeholder until the loop exports its own gauge.
+        # The rule is disabled (`expr: vector(0)`) until that plumbing lands.
+        expr: vector(0)
+        for: 1m
+        labels:
+          severity: warning
+          tracking: TODO
+        annotations:
+          summary: "Background purge stalled (rule needs a dedicated gauge)"
+          description: |
+            Placeholder until the purge loop emits
+            `egg_storage_last_purge_timestamp_seconds`. See RUNBOOK §purge.

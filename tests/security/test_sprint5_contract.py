@@ -262,6 +262,7 @@ _EXPECTED_PATHS = {
     "/admin/v1/config",
     "/admin/v1/config/validate",
     "/admin/v1/test-query",
+    "/admin/v1/debug/translate",
     "/admin/v1/usage",
     "/admin/v1/status",
     "/admin/v1/storage/stats",
