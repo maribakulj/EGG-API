@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import time
 from pathlib import Path
 
@@ -34,6 +36,80 @@ logger = structlog.get_logger("egg.http")
 # (including admin endpoints) and let anonymous callers fingerprint the
 # surface. The custom /v1/openapi.json stays on in every environment for
 # programmatic clients.
+# Shared metrics for the background purge task so operators can watch it
+# from the existing Prometheus scrape.
+# The value types intentionally track the schema of /admin/v1/storage/stats
+# consumers expect; mypy needs the explicit Any to accept the mixed payload
+# (numbers + nullable float timestamp).
+from typing import Any  # noqa: E402
+
+_last_purge_state: dict[str, Any] = {
+    "last_run_at": None,
+    "sessions_purged": 0,
+    "events_purged": 0,
+    "errors": 0,
+}
+
+
+async def _purge_loop() -> None:
+    """Periodically evict expired admin sessions and stale usage events.
+
+    Disabled when ``storage.purge_interval_seconds`` is non-positive. The
+    task survives errors: it logs and keeps looping so a transient SQLite
+    failure does not silently stop the retention clock.
+    """
+    storage_cfg = container.config_manager.config.storage
+    interval = int(storage_cfg.purge_interval_seconds)
+    if interval <= 0:
+        logger.info("purge_loop_disabled", interval=interval)
+        return
+
+    while True:
+        try:
+            await asyncio.sleep(interval)
+            retention_days = int(
+                container.config_manager.config.storage.usage_events_retention_days
+            )
+            sessions = await run_in_threadpool(container.store.purge_expired_ui_sessions)
+            events = await run_in_threadpool(
+                container.store.purge_usage_events_older_than, retention_days
+            )
+            _last_purge_state.update(
+                {
+                    "last_run_at": time.time(),
+                    "sessions_purged": int(sessions),
+                    "events_purged": int(events),
+                }
+            )
+            logger.info(
+                "purge_loop_tick",
+                sessions_purged=sessions,
+                events_purged=events,
+                retention_days=retention_days,
+            )
+        except asyncio.CancelledError:
+            logger.info("purge_loop_cancelled")
+            raise
+        except Exception:
+            _last_purge_state["errors"] = int(_last_purge_state.get("errors", 0)) + 1
+            logger.exception("purge_loop_tick_failed")
+
+
+@contextlib.asynccontextmanager
+async def _lifespan(_: FastAPI):
+    task = asyncio.create_task(_purge_loop())
+    try:
+        yield
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+
+# Hide the interactive explorers in production: they list every route
+# (including admin endpoints) and let anonymous callers fingerprint the
+# surface. The custom /v1/openapi.json stays on in every environment for
+# programmatic clients.
 _PROD = is_production()
 app = FastAPI(
     title="EGG-API",
@@ -41,6 +117,7 @@ app = FastAPI(
     docs_url=None if _PROD else "/docs",
     redoc_url=None if _PROD else "/redoc",
     openapi_url=None if _PROD else "/openapi.json",
+    lifespan=_lifespan,
 )
 
 # Rewrite request.client.host and request.url.scheme from X-Forwarded-* when

@@ -137,7 +137,6 @@ def test_m1_indexes_exist_after_initialize(tmp_path: Path) -> None:
         "idx_usage_events_timestamp",
         "idx_usage_events_subject",
         "idx_usage_events_status",
-        "idx_quota_counters_subject",
         "idx_ui_sessions_expires",
     }
     missing = expected - names

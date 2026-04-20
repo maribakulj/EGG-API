@@ -94,6 +94,29 @@ def cmd_check_backend(_: argparse.Namespace) -> int:
         return 3
 
 
+def cmd_migrate(_: argparse.Namespace) -> int:
+    cfg_path = get_config_path()
+    cfg = AppConfig()
+    if cfg_path.exists():
+        cfg = ConfigManager(cfg_path, require_existing=True).config
+    db_path = get_state_db_path(cfg.storage.sqlite_path)
+    store = SQLiteStore(db_path)
+    with store._connect() as conn:
+        from app.storage.migrations import current_version, migrate
+
+        before = current_version(conn)
+        applied = migrate(conn)
+        after = current_version(conn)
+    output = {
+        "db_path": str(db_path),
+        "before": before,
+        "after": after,
+        "applied": [{"version": m.version, "name": m.name} for m in applied],
+    }
+    print(json.dumps(output, indent=2))
+    return 0
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     uvicorn.run("app.main:app", host=args.host, port=args.port, reload=args.reload)
     return 0
@@ -123,6 +146,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     show = sub.add_parser("print-paths", help="Print effective config/state paths")
     show.set_defaults(func=cmd_print_paths)
+
+    migrate = sub.add_parser("migrate", help="Apply pending schema migrations")
+    migrate.set_defaults(func=cmd_migrate)
 
     return parser
 

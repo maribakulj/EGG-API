@@ -72,6 +72,9 @@ class CorsConfig(BaseModel):
 
 class StorageConfig(BaseModel):
     sqlite_path: str = "data/egg_state.sqlite3"
+    # Retention knobs for the background purge task. Set to 0 to disable.
+    usage_events_retention_days: int = 30
+    purge_interval_seconds: int = 3600
 
 
 class FieldMapping(BaseModel):

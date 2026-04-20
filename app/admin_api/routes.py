@@ -89,3 +89,20 @@ def status() -> dict[str, object]:
             500,
         )
     return {"status": "ok", "sources": container.adapter.list_sources(), "mapping": mapping}
+
+
+@router.get("/storage/stats")
+def storage_stats() -> dict[str, object]:
+    """Row counts, on-disk size, schema version and last purge snapshot.
+
+    Intended for capacity planning and retention sanity checks. No secret
+    material is returned — only structural counters and aggregate bytes.
+    """
+    from app.main import _last_purge_state
+
+    stats = container.store.storage_stats()
+    cfg = container.config_manager.config.storage
+    stats["last_purge"] = dict(_last_purge_state)
+    stats["retention_days"] = cfg.usage_events_retention_days
+    stats["purge_interval_seconds"] = cfg.purge_interval_seconds
+    return stats
