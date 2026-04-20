@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to PISCO-API are documented in this file.
+All notable changes to EGG-API are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -10,8 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Observability** — Prometheus metrics on `GET /metrics`
-  (`pisco_requests_total`, `pisco_request_duration_seconds`,
-  `pisco_backend_errors_total`, `pisco_rate_limit_hits_total`). Structured
+  (`egg_requests_total`, `egg_request_duration_seconds`,
+  `egg_backend_errors_total`, `egg_rate_limit_hits_total`). Structured
   JSON logs via `structlog`, with `request_id` / `key_id` / `latency_ms`
   bound per request.
 - **Caching** — `Cache-Control` + strong `ETag` on `/v1/search`,

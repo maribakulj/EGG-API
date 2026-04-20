@@ -206,12 +206,12 @@ def test_l3_session_expiry_forces_redirect_to_login(client, admin_headers) -> No
     )
     token = None
     for raw in login.headers.get_list("set-cookie") if hasattr(login.headers, "get_list") else []:
-        if raw.lower().startswith("pisco_admin_session="):
+        if raw.lower().startswith("egg_admin_session="):
             token = raw.split("=", 1)[1].split(";", 1)[0]
             break
     if token is None:
         # Fallback: read from the TestClient cookie jar.
-        token = client.cookies.get("pisco_admin_session")
+        token = client.cookies.get("egg_admin_session")
     assert token, "expected a session cookie"
 
     # Force the session expired.

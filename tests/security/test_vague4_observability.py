@@ -30,9 +30,9 @@ def test_h9_metrics_endpoint_returns_prometheus_exposition(client) -> None:
     assert ct.startswith("text/plain") and "version=" in ct
     body = response.text
     # Counters & histograms we registered are present:
-    assert "pisco_requests_total" in body
+    assert "egg_requests_total" in body
     assert 'endpoint="/v1/search"' in body
-    assert "pisco_request_duration_seconds" in body
+    assert "egg_request_duration_seconds" in body
 
 
 def test_h9_rate_limit_counter_increments_on_429(client) -> None:
@@ -46,7 +46,7 @@ def test_h9_rate_limit_counter_increments_on_429(client) -> None:
     assert second.status_code == 429
 
     metrics = client.get("/metrics").text
-    assert 'pisco_rate_limit_hits_total{scope="public"}' in metrics
+    assert 'egg_rate_limit_hits_total{scope="public"}' in metrics
 
 
 def test_h9_backend_error_counter_increments_on_transient_failure() -> None:
@@ -69,15 +69,15 @@ def test_h9_backend_error_counter_increments_on_transient_failure() -> None:
     before_count = sum(
         1
         for line in before.splitlines()
-        if line.startswith('pisco_backend_errors_total{error_code="backend_unavailable"}')
+        if line.startswith('egg_backend_errors_total{error_code="backend_unavailable"}')
     )
 
     with pytest.raises(AppError):
         adapter.search(NormalizedQuery(q="x"))
 
     after = generate_latest(metrics_registry).decode()
-    after_value = _extract_counter(after, 'pisco_backend_errors_total{error_code="backend_unavailable"}')
-    before_value = _extract_counter(before, 'pisco_backend_errors_total{error_code="backend_unavailable"}')
+    after_value = _extract_counter(after, 'egg_backend_errors_total{error_code="backend_unavailable"}')
+    before_value = _extract_counter(before, 'egg_backend_errors_total{error_code="backend_unavailable"}')
     assert after_value > before_value
     # Confirm the metric is registered exactly once (no duplicate registry).
     assert before_count <= 1
@@ -97,7 +97,7 @@ def _extract_counter(exposition: str, series_prefix: str) -> float:
 def test_h10_get_logger_returns_a_bound_logger() -> None:
     from app.logging import get_logger
 
-    log = get_logger("pisco.test")
+    log = get_logger("egg.test")
     # structlog BoundLogger exposes info/debug/warning and bind.
     assert callable(log.info)
     assert callable(log.warning)

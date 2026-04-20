@@ -5,8 +5,8 @@ import tempfile
 
 # Pin env vars before any app modules load so the container doesn't
 # generate a sidecar file under the repo working tree.
-os.environ.setdefault("PISCO_BOOTSTRAP_ADMIN_KEY", "test-admin-key-abcdefghijklmnop")
-os.environ.setdefault("PISCO_HOME", tempfile.mkdtemp(prefix="pisco-test-home-"))
+os.environ.setdefault("EGG_BOOTSTRAP_ADMIN_KEY", "test-admin-key-abcdefghijklmnop")
+os.environ.setdefault("EGG_HOME", tempfile.mkdtemp(prefix="egg-test-home-"))
 
 from typing import Any
 

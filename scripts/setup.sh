@@ -10,5 +10,5 @@ python -m pip install --upgrade pip
 python -m pip install --no-build-isolation -e ".[dev]"
 
 echo "Setup complete. Next steps:"
-echo "  pisco-api init"
-echo "  pisco-api run --reload"
+echo "  egg-api init"
+echo "  egg-api run --reload"

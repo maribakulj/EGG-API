@@ -20,7 +20,7 @@ class ConfigManager:
 
         if require_existing:
             raise FileNotFoundError(
-                f"Configuration file does not exist: {self.path}. Run `pisco-api init` to create it."
+                f"Configuration file does not exist: {self.path}. Run `egg-api init` to create it."
             )
 
     @property

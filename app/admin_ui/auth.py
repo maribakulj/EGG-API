@@ -5,7 +5,7 @@ from fastapi import Request
 from app.dependencies import container
 from app.errors import AppError
 
-SESSION_COOKIE = "pisco_admin_session"
+SESSION_COOKIE = "egg_admin_session"
 
 
 def create_ui_session_for_api_key(api_key: str) -> str:

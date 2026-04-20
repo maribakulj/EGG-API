@@ -15,17 +15,17 @@ registry = CollectorRegistry()
 # --- HTTP request metrics ----------------------------------------------------
 
 request_count = Counter(
-    "pisco_requests_total",
-    "Total HTTP requests handled by PISCO-API.",
+    "egg_requests_total",
+    "Total HTTP requests handled by EGG-API.",
     labelnames=("endpoint", "method", "status"),
     registry=registry,
 )
 
 request_duration = Histogram(
-    "pisco_request_duration_seconds",
+    "egg_request_duration_seconds",
     "HTTP request latency in seconds.",
     labelnames=("endpoint", "method"),
-    # Buckets tuned for typical PISCO latency (ms range) with a long tail.
+    # Buckets tuned for typical EGG latency (ms range) with a long tail.
     buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0),
     registry=registry,
 )
@@ -33,14 +33,14 @@ request_duration = Histogram(
 # --- Backend and policy counters --------------------------------------------
 
 backend_errors = Counter(
-    "pisco_backend_errors_total",
+    "egg_backend_errors_total",
     "Backend call failures grouped by error code.",
     labelnames=("error_code",),
     registry=registry,
 )
 
 rate_limit_hits = Counter(
-    "pisco_rate_limit_hits_total",
+    "egg_rate_limit_hits_total",
     "Number of requests rejected by a rate limiter.",
     labelnames=("scope",),
     registry=registry,

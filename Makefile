@@ -6,19 +6,19 @@ setup:
 install: setup
 
 init:
-	pisco-api init
+	egg-api init
 
 run:
-	pisco-api run --reload --port 8000
+	egg-api run --reload --port 8000
 
 check-config:
-	pisco-api check-config
+	egg-api check-config
 
 check-backend:
-	pisco-api check-backend
+	egg-api check-backend
 
 print-paths:
-	pisco-api print-paths
+	egg-api print-paths
 
 test:
 	pytest

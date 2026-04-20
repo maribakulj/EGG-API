@@ -1,14 +1,37 @@
-# PISCO-API
+# EGG-API — Easy GLAM Gateway API
 
-**Safe, normalized, backend-agnostic public API in front of a GLAM search backend.**
+**A plug-and-play, safely-exposed public API for the collections of small heritage institutions (GLAM: Galleries, Libraries, Archives, Museums).**
 
-PISCO-API is a FastAPI service that sits between a public consumer (catalog, portal, third-party client) and your existing search backend (Elasticsearch today, OpenSearch / Solr planned). It does three jobs:
+EGG-API exists for a simple reason: small GLAM institutions have *data* — a catalog, an ILS, a DAMS, an Elasticsearch index — but rarely a software team. They still deserve to publish a clean, stable, secured public API on top of that data, without hiring a developer and without rewriting the backend they already run.
 
-1. **Normalize** — turn heterogeneous backend records into a stable public `Record` schema via a configuration-driven mapper.
-2. **Protect** — never expose the raw backend DSL, enforce a configurable `SecurityProfile` (page size, facet/sort allowlists, pagination depth, field exposure), and rate-limit callers.
+EGG-API is the middle layer that makes this possible. It sits between the public and the existing backend, learns how to read it through **standard configuration menus** (no code, no custom query DSL to learn), and exposes a normalized, safe API in front of it.
+
+### What it does today
+
+1. **Normalize** — turn heterogeneous backend records into a stable public `Record` schema via a configuration-driven mapper (no code required, just a YAML or an admin-UI form).
+2. **Protect** — never expose the raw backend query DSL, enforce a configurable `SecurityProfile` (page size, facet/sort allowlists, pagination depth, field exposure), and rate-limit callers.
 3. **Observe** — emit structured JSON logs and Prometheus metrics, persist an auditable usage log, and surface backend health.
 
-> PISCO-API does not replace your source search engine, ILS, DAMS, or portal. It is a **normalizing, protective facade** that can later serve as the base for an MCP connector (see SPECS §4).
+> EGG-API does not replace your source search engine, ILS, DAMS, or portal. It is a **normalizing, protective facade** that plugs on top of what you already run, and that can later serve as the base for an MCP connector (see SPECS §4).
+
+### Who it is for
+
+- **Small archives, libraries, museums, galleries** that host their own data but do not have IT or software-engineering staff on hand.
+- **Librarians, archivists, documentalists, curators** who need to expose their holdings to a portal, a partner, or an aggregator, and want to do so *safely* without improvising a custom API.
+- **Consortiums and aggregators** that need a predictable, stable contract regardless of which backend each member institution happens to run.
+
+You should **not** need to write Python, a query DSL, or a REST spec to deploy it. If you can edit a settings form, you can run EGG-API.
+
+### The long-term vision: a desktop app
+
+Today, EGG-API ships as a FastAPI service with a web-based admin UI at `/admin/*`. The **end goal** is to wrap the same runtime into a **desktop application** that a non-technical staff member can install on a workstation or a small server and configure entirely through standard, guided menus:
+
+- point it at the existing backend (URL, index/collection, credentials);
+- let it introspect the backend fields and propose a default mapping;
+- pick a security profile (prudent / standard / custom);
+- click **Publish** and get a secured, documented public API on top of the institution's data.
+
+No terminal, no YAML hand-editing, no DevOps rotation. Install, configure, expose — safely.
 
 ---
 
@@ -114,10 +137,10 @@ The test suite runs fully offline with an in-memory fake adapter and `httpx.Mock
 ./scripts/setup.sh
 
 # 2. Initialize config + state DB + bootstrap admin key.
-pisco-api init
+egg-api init
 
 # 3. Start the service with auto-reload.
-pisco-api run --reload
+egg-api run --reload
 ```
 
 Open:
@@ -127,21 +150,21 @@ Open:
 - **Admin UI**: http://127.0.0.1:8000/admin/login
 - **OpenAPI**: http://127.0.0.1:8000/v1/openapi.json
 
-The first `pisco-api init` on a fresh machine will either honour `PISCO_BOOTSTRAP_ADMIN_KEY` or generate a random admin key and store it at `data/bootstrap_admin.key` with `0600` permissions. **Copy that key now** — it is needed to log into the admin UI and to authenticate admin API calls.
+The first `egg-api init` on a fresh machine will either honour `EGG_BOOTSTRAP_ADMIN_KEY` or generate a random admin key and store it at `data/bootstrap_admin.key` with `0600` permissions. **Copy that key now** — it is needed to log into the admin UI and to authenticate admin API calls.
 
 ---
 
 ## Operator CLI
 
-`pisco-api` is a small wrapper around uvicorn that exposes the usual operator workflows:
+`egg-api` is a small wrapper around uvicorn that exposes the usual operator workflows:
 
 | Command | Purpose |
 | --- | --- |
-| `pisco-api init [--force]` | Create a baseline config + state DB + bootstrap admin key |
-| `pisco-api run [--host H] [--port P] [--reload]` | Start the service (default `127.0.0.1:8000`) |
-| `pisco-api check-config` | Validate the on-disk config (cross-field rules included) |
-| `pisco-api check-backend` | Probe the configured backend for reachability |
-| `pisco-api print-paths` | Show effective config / state-db / bootstrap-key paths |
+| `egg-api init [--force]` | Create a baseline config + state DB + bootstrap admin key |
+| `egg-api run [--host H] [--port P] [--reload]` | Start the service (default `127.0.0.1:8000`) |
+| `egg-api check-config` | Validate the on-disk config (cross-field rules included) |
+| `egg-api check-backend` | Probe the configured backend for reachability |
+| `egg-api print-paths` | Show effective config / state-db / bootstrap-key paths |
 
 Equivalent `make` targets (`make setup`, `make init`, `make run`, `make check-config`, `make check-backend`, `make print-paths`, `make test`) are provided for convenience.
 
@@ -149,7 +172,7 @@ Equivalent `make` targets (`make setup`, `make init`, `make run`, `make check-co
 
 ## Configuration
 
-Config lives in a single YAML file (default: `config/pisco.yaml`). A fully annotated example ships in `examples/config.yaml`.
+Config lives in a single YAML file (default: `config/egg.yaml`). A fully annotated example ships in `examples/config.yaml`.
 
 ### Top-level sections
 
@@ -211,21 +234,21 @@ The config is validated by Pydantic + custom `model_validator`s that check:
 - Every `allowed_include_fields` entry is either structural (`id`/`type`) or declared in `mapping`.
 - Any `required`/`recommended` mapping rule declares at least one of `source`, `sources`, `constant`, or `template`.
 
-Invalid configs fail `pisco-api check-config` fast with a structured error.
+Invalid configs fail `egg-api check-config` fast with a structured error.
 
 ---
 
 ## Security model
 
-PISCO-API was hardened against a full audit; the highlights that matter most in production:
+EGG-API was hardened against a full audit; the highlights that matter most in production:
 
-- **Bootstrap admin key** is never the legacy `admin-change-me`. If no key is provided via env or config, a random token is generated (dev only) and persisted at `data/bootstrap_admin.key` with `0600` perms. In production (`PISCO_ENV=production`) the service refuses to start if no explicit key is available.
+- **Bootstrap admin key** is never the legacy `admin-change-me`. If no key is provided via env or config, a random token is generated (dev only) and persisted at `data/bootstrap_admin.key` with `0600` perms. In production (`EGG_ENV=production`) the service refuses to start if no explicit key is available.
 - **Secrets never leak to YAML.** `ConfigManager.save()` strips `auth.bootstrap_admin_key` before writing; in-memory config keeps the secret.
 - **Usage log never stores the raw API key.** The audit middleware resolves `x-api-key` to the public `key_id` label; anonymous or invalid-key traffic falls back to the client host.
 - **Admin session cookie** defaults to `Secure=true` + `SameSite=strict`, with a configurable TTL (default 12 h) enforced at the DB level and purged on read.
 - **Brute-force guard on `/admin/login`** — a dedicated per-IP rate limiter runs **before** credential verification (default 10 attempts / 5 min).
 - **SSRF hardening** — the backend `httpx.Client` is created with `follow_redirects=False`.
-- **Security headers** — `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY` + CSP on `/admin`, HSTS when `PISCO_ENV=production`.
+- **Security headers** — `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY` + CSP on `/admin`, HSTS when `EGG_ENV=production`.
 - **CORS off by default** (`cors.mode: off`); enable via `allowlist` (explicit origins) or `wide_open` (`*`, credentials disabled).
 - **Admin UI is autoescaped Jinja2.** `templates.env.autoescape = True` is asserted explicitly, and no route builds HTML via string concatenation.
 - **Key labels are regex-validated** (`^[a-zA-Z0-9_.-]{1,64}$`) at creation and on status-action routes.
@@ -240,16 +263,16 @@ PISCO-API was hardened against a full audit; the highlights that matter most in 
 
 | Metric | Type | Labels | Meaning |
 | --- | --- | --- | --- |
-| `pisco_requests_total` | Counter | `endpoint`, `method`, `status` | Every HTTP response |
-| `pisco_request_duration_seconds` | Histogram | `endpoint`, `method` | Request latency (buckets 5 ms → 10 s) |
-| `pisco_backend_errors_total` | Counter | `error_code` | Incremented on every backend failure |
-| `pisco_rate_limit_hits_total` | Counter | `scope` (`public`/`admin`) | Incremented on every `429` |
+| `egg_requests_total` | Counter | `endpoint`, `method`, `status` | Every HTTP response |
+| `egg_request_duration_seconds` | Histogram | `endpoint`, `method` | Request latency (buckets 5 ms → 10 s) |
+| `egg_backend_errors_total` | Counter | `error_code` | Incremented on every backend failure |
+| `egg_rate_limit_hits_total` | Counter | `scope` (`public`/`admin`) | Incremented on every `429` |
 
 ### Structured logs
 
 `structlog` is configured at import time to emit newline-delimited JSON to stderr. Every request produces one `"event": "request"` line with `request_id`, `method`, `path`, `status_code`, `latency_ms`, and the resolved `key_id` (never the secret). Stdlib loggers (`httpx`, `uvicorn`) share the same renderer.
 
-Control the level via `PISCO_LOG_LEVEL=DEBUG|INFO|WARNING|ERROR` (default `INFO`).
+Control the level via `EGG_LOG_LEVEL=DEBUG|INFO|WARNING|ERROR` (default `INFO`).
 
 ### Usage log
 
@@ -347,34 +370,34 @@ The session cookie is `HttpOnly`; it is `Secure` + `SameSite=strict` by default 
 
 ## Runtime paths & environment
 
-Defaults (relative to `PISCO_HOME`, which defaults to the process CWD):
+Defaults (relative to `EGG_HOME`, which defaults to the process CWD):
 
 | Path | Default |
 | --- | --- |
-| Config file | `config/pisco.yaml` |
-| State DB | `data/pisco_state.sqlite3` |
+| Config file | `config/egg.yaml` |
+| State DB | `data/egg_state.sqlite3` |
 | Bootstrap admin key sidecar | `data/bootstrap_admin.key` |
 
 Environment overrides:
 
 | Variable | Purpose |
 | --- | --- |
-| `PISCO_HOME` | Base dir for default paths |
-| `PISCO_CONFIG_PATH` | Absolute override for the config file |
-| `PISCO_STATE_DB_PATH` | Absolute override for the SQLite state DB |
-| `PISCO_BOOTSTRAP_KEY_PATH` | Absolute override for the sidecar key file |
-| `PISCO_BOOTSTRAP_ADMIN_KEY` | Explicit bootstrap key (highest priority) |
-| `PISCO_ENV` | `development` (default) or `production` — toggles HSTS and stricter bootstrap rules |
-| `PISCO_LOG_LEVEL` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
+| `EGG_HOME` | Base dir for default paths |
+| `EGG_CONFIG_PATH` | Absolute override for the config file |
+| `EGG_STATE_DB_PATH` | Absolute override for the SQLite state DB |
+| `EGG_BOOTSTRAP_KEY_PATH` | Absolute override for the sidecar key file |
+| `EGG_BOOTSTRAP_ADMIN_KEY` | Explicit bootstrap key (highest priority) |
+| `EGG_ENV` | `development` (default) or `production` — toggles HSTS and stricter bootstrap rules |
+| `EGG_LOG_LEVEL` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
 
-Run `pisco-api print-paths` to inspect effective values.
+Run `egg-api print-paths` to inspect effective values.
 
 ### Constrained / offline environments
 
 ```bash
 python -m pip install --no-index --find-links /path/to/wheels -e .[dev]
-pisco-api init
-pisco-api run
+egg-api init
+egg-api run
 ```
 
 ---
@@ -418,7 +441,7 @@ Any change to a public behavior ships with a regression test — see [CHANGELOG.
 ## Project layout
 
 ```
-PISCO-API/
+EGG-API/
 ├── app/
 │   ├── adapters/elasticsearch/      # httpx-based adapter with retries + version gate
 │   ├── admin_api/                   # /admin/v1/* routes
@@ -433,7 +456,7 @@ PISCO-API/
 │   ├── rate_limit/                  # InMemoryRateLimiter (named constants)
 │   ├── schemas/                     # Pydantic response models (Record, SearchResponse)
 │   ├── storage/                     # SQLiteStore (keys, sessions, quotas, usage)
-│   ├── cli.py                       # `pisco-api` entry point
+│   ├── cli.py                       # `egg-api` entry point
 │   ├── dependencies.py              # DI container with threadsafe reload()
 │   ├── errors.py                    # AppError + JSON renderer
 │   ├── http_cache.py                # Cache-Control + ETag + 304 helper

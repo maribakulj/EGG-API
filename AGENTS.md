@@ -1,7 +1,7 @@
 # AGENTS.md
 
 ## Project
-PISCO-API is a plug-and-play API layer for GLAM collections.
+EGG-API is a plug-and-play API layer for GLAM collections.
 
 ## Current repository state
 This repository is at an initial stage.
