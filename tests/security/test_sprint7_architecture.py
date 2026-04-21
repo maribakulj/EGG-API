@@ -31,14 +31,13 @@ def test_s7_1_opensearch_adapter_satisfies_protocol() -> None:
     assert isinstance(adapter, BackendAdapter)
 
 
-def test_s7_1_fake_adapter_from_conftest_satisfies_protocol(client) -> None:
-    # The autouse ``reset_container`` fixture installs the conftest
-    # FakeAdapter on container.adapter — go through there so this test
-    # works whether or not ``tests`` is importable as a package on the
-    # current runner (it is not on GitHub Actions, by design).
-    from app.dependencies import container
+def test_s7_1_fake_adapter_satisfies_protocol() -> None:
+    # FakeAdapter now lives in ``tests._fakes`` (a real importable
+    # module) so we can assert conformance explicitly rather than
+    # reaching through a fixture's side effect on ``container.adapter``.
+    from tests._fakes import FakeAdapter
 
-    assert isinstance(container.adapter, BackendAdapter)
+    assert isinstance(FakeAdapter(), BackendAdapter)
 
 
 # ---------------------------------------------------------------------------

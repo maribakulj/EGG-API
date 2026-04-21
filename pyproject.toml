@@ -48,6 +48,10 @@ egg-api = "app.cli:main"
 [tool.pytest.ini_options]
 addopts = "-q --cov=app --cov-report=term-missing --cov-report=xml --cov-fail-under=80"
 testpaths = ["tests"]
+# Pin the repo root so ``tests._fakes`` (and any other test-shared module)
+# resolves identically on every runner — the default rootdir heuristic
+# is fragile under GitHub Actions / xdist.
+pythonpath = ["."]
 
 [tool.coverage.run]
 source = ["app"]
