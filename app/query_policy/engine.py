@@ -31,6 +31,7 @@ class QueryPolicyEngine:
         "facet",
         "include_fields",
         "format",
+        "cursor",
         "type",
         "collection",
         "language",
@@ -95,9 +96,11 @@ class QueryPolicyEngine:
                 "page_size exceeds policy",
                 {"max": self.profile.page_size_max, "requested": page_size},
             )
-        # ES rejects reads past `from + size`; that's page * page_size here.
+        # Deep pagination is forbidden via ``from+size`` but fine via the
+        # ``cursor`` token — ES ``search_after`` is unbounded by design.
+        cursor = qp.get("cursor") or None
         requested_depth = page * page_size
-        if requested_depth > self.profile.max_depth:
+        if cursor is None and requested_depth > self.profile.max_depth:
             raise AppError(
                 "unsupported_operation",
                 "Deep pagination is not supported",
@@ -175,6 +178,7 @@ class QueryPolicyEngine:
             date_to=qp.get("date_to"),
             has_digital=self._parse_bool(qp.get("has_digital")),
             has_iiif=self._parse_bool(qp.get("has_iiif")),
+            cursor=cursor,
         )
 
     def compute_cache_key(self, nq: NormalizedQuery) -> str:

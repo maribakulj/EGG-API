@@ -1,24 +1,25 @@
 from __future__ import annotations
 
 import hmac
-import secrets
 from hashlib import sha256
 
 from fastapi import Request
 
 from app.dependencies import container
 from app.errors import AppError
+from app.runtime_paths import resolve_csrf_signing_key
 
 SESSION_COOKIE = "egg_admin_session"
 CSRF_FORM_FIELD = "csrf_token"
 CSRF_HEADER = "x-csrf-token"
 
-# Process-scoped signing key. Regenerated at each process start on purpose:
-# CSRF tokens minted by a previous process are rejected after restart and the
-# next page GET issues a fresh one. The signing key never lives on disk and is
-# not derived from the session cookie or the admin key, so compromising one
-# does not compromise the other.
-_CSRF_SIGNING_KEY = secrets.token_bytes(32)
+# Persistent signing key loaded from the EGG_HOME sidecar (or the
+# ``EGG_CSRF_SIGNING_KEY`` env var). Pre-Sprint-10 we regenerated this at
+# every import, which meant a restart silently invalidated every open
+# admin tab and made multi-node deploys impossible without extra config.
+# The sidecar is 0600 under ``EGG_HOME/data/csrf_signing.key``; operators
+# wanting to share it across nodes should set the env var.
+_CSRF_SIGNING_KEY = resolve_csrf_signing_key()
 
 
 def _csrf_for_session(session_token: str) -> str:

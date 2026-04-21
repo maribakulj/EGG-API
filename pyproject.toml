@@ -1,6 +1,6 @@
 [project]
 name = "egg-api"
-version = "0.1.0"
+version = "1.0.0"
 description = "EGG-API: safe, normalized API facade for GLAM search backends"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -22,10 +22,14 @@ dev = [
   "pytest>=8.2.0",
   "pytest-asyncio>=0.23.0",
   "pytest-cov>=5.0.0",
+  "pytest-xdist>=3.6.0",
   "ruff>=0.6.0",
   "mypy>=1.11.0",
   "pre-commit>=3.8.0",
-  "types-PyYAML>=6.0.0"
+  "types-PyYAML>=6.0.0",
+  # Backport of the stdlib ``tomllib`` (stdlib since 3.11); pulled in
+  # only for 3.10 so test_sprint9_release can read pyproject.toml.
+  "tomli>=2.0.1; python_version < '3.11'"
 ]
 otel = [
   "opentelemetry-api>=1.27.0",
@@ -34,6 +38,9 @@ otel = [
   "opentelemetry-instrumentation-httpx>=0.48b0",
   "opentelemetry-exporter-otlp-proto-http>=1.27.0"
 ]
+redis = [
+  "redis>=5.0.0"
+]
 
 [project.scripts]
 egg-api = "app.cli:main"
@@ -41,6 +48,10 @@ egg-api = "app.cli:main"
 [tool.pytest.ini_options]
 addopts = "-q --cov=app --cov-report=term-missing --cov-report=xml --cov-fail-under=80"
 testpaths = ["tests"]
+# Pin the repo root so ``tests._fakes`` (and any other test-shared module)
+# resolves identically on every runner — the default rootdir heuristic
+# is fragile under GitHub Actions / xdist.
+pythonpath = ["."]
 
 [tool.coverage.run]
 source = ["app"]

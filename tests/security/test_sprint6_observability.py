@@ -15,15 +15,17 @@ import yaml
 
 
 def test_s6_1_tracing_disabled_without_env(monkeypatch) -> None:
+    # Sprint 10 cleanup: use ``reset_for_tests()`` instead of
+    # ``sys.modules.pop("app.tracing")``. The former only resets the
+    # instrumented/enabled flags; the latter re-ran every module-level
+    # side effect in app.tracing and leaked state into subsequent tests.
+    from fastapi import FastAPI
+
+    from app import tracing
+
     monkeypatch.delenv("EGG_OTEL_ENDPOINT", raising=False)
     monkeypatch.delenv("OTEL_EXPORTER_OTLP_ENDPOINT", raising=False)
-    # Re-import to reset the module-level _INSTRUMENTED flag.
-    import importlib
-    import sys
-
-    sys.modules.pop("app.tracing", None)
-    tracing = importlib.import_module("app.tracing")
-    from fastapi import FastAPI
+    tracing.reset_for_tests()
 
     assert tracing.configure_tracing(FastAPI()) is False
     assert tracing.is_enabled() is False

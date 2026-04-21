@@ -5,88 +5,210 @@ All notable changes to EGG-API are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.0] — 2026-04-21
+
+First stable release after a full audit-driven sprint series (S0 → S8).
+284 tests green, 82.88% coverage, ruff + ruff format + mypy clean.
+
+### Breaking
+
+- `/v1/suggest` went from `404` stub → `200` with a real ES-backed
+  implementation (S8.3). Re-add it to any contract tests you had
+  relying on the 404.
+- `/v1/manifest/{id}` remains **retired**. Paths starting with
+  `/v1/manifest` return `404`; re-introduce them with a proper
+  backend integration if/when IIIF proxy support lands.
+- `Record.raw_identifiers` was removed (S5.6) — duplicates the
+  `identifiers` object and was always empty in practice.
+- `/v1/health` body shrunk to `{"status":"ok"}` (S1.9). Operators
+  wanting the previous detail can hit `/v1/readyz` (admin-gated) or
+  `/v1/livez` (public).
+- HTTP caching: `Vary: x-api-key` was dropped and `Cache-Control`
+  now switches between `public` and `private` based on
+  `auth.public_mode` (S5.3). Shared caches that relied on `Vary`
+  should adopt `Cache-Control: private` directly.
+
+### Added
+
+- **Sprint 0 — tooling**: ruff (lint + format), mypy, pytest-cov
+  (80% gate), GitHub Actions CI (lint + 3.10/3.11/3.12 matrix),
+  multi-stage Dockerfile (non-root `egg` user), docker-compose stack
+  (ES 8 + EGG), pip-compile lock files.
+- **Sprint 1 — critical security** (S1.1 – S1.11):
+  - Rate-limit buckets key on `key_id` or IP, never the raw secret.
+  - Prometheus `endpoint` label uses the route template
+    (`/v1/records/{record_id}`) — no cardinality explosion.
+  - `SchemaMapper` raises `AppError("bad_gateway", 502)` when a
+    backend record has no usable id, instead of a Pydantic 500.
+  - `usage_audit_middleware` wraps the persist/log/metrics path in
+    `try/finally` so 500s land in `usage_events` too.
+  - `Container.reload()` closes the previous httpx.Client (no more
+    socket/FD leak across reloads).
+  - UI session tokens are SHA-256 hashed at rest (raw cookie never
+    lands in SQLite).
+  - `x-request-id` header is validated against
+    `^[A-Za-z0-9._-]{1,64}$` or regenerated.
+  - Input-size caps: `q ≤ 512`, `≤ 50` values per filter,
+    `≤ 256` chars per filter value, `≤ 20` include_fields.
+  - `/v1/health` split into `/v1/livez` (public) and `/v1/readyz`
+    (admin).
+  - `/docs`, `/redoc`, `/openapi.json` hidden in production.
+  - `/metrics` requires admin `X-API-Key` or `EGG_METRICS_TOKEN`
+    bearer in production.
+- **Sprint 2 — CSRF + UI hardening** (S2.1 – S2.10):
+  - Double-submit CSRF on every admin UI POST (HMAC of
+    `session_cookie` with a per-process signing key; no DB writes).
+  - `samesite=none` rejected at config-load when
+    `admin_cookie_secure=false`.
+  - Generic error copy in the UI — Pydantic traces never leak.
+  - `uvicorn.ProxyHeadersMiddleware` opt-in via
+    `proxy.trusted_proxies`.
+  - `POST /admin/logout-everywhere` purges every live session for
+    the current `key_id`.
+  - `POST /admin/ui/keys/{key_id}/rotate` regenerates the secret +
+    invalidates sessions. Rotating the `admin` key updates
+    `default_admin_key` in memory so the next reload does not
+    resurrect the old value.
+  - `SQLiteStore.set_key_status` split into
+    `set_key_status_by_key_id` / `_by_secret` (no more OR-clause).
+  - INSTALL.md gains a reverse-proxy deploy section (nginx,
+    Traefik, sanity curls).
+- **Sprint 3 — async + retry hardening** (S3.1 – S3.8):
+  - Threadpool (Option A) — see `docs/adr-001-async-io-strategy.md`.
+  - `SQLiteStore` keeps one `sqlite3.Connection` per thread, keyed
+    by `db_path`. `check_same_thread=False` safe thanks to the
+    per-thread pool.
+  - `usage_audit_middleware` runs `get_identity` + `log_usage_event`
+    via `run_in_threadpool`.
+  - ElasticsearchAdapter retries cap backoff
+    (`retry_backoff_cap_seconds`, default 5 s), add ±25% jitter,
+    and honour a global `retry_deadline_seconds` (default 30 s).
+- **Sprint 4 — persistence + migrations + pepper** (S4.1 – S4.9):
+  - Versioned migration runner (`app/storage/migrations.py`) with
+    5 baseline migrations and a legacy-DB baseline heuristic.
+  - `egg-api migrate` CLI reports before/after version + applied
+    list.
+  - Background purge task (FastAPI `lifespan`): evicts expired UI
+    sessions + `usage_events` older than
+    `usage_events_retention_days` (default 30).
+  - `GET /admin/v1/storage/stats` exposes row counts, on-disk size,
+    schema version, last purge snapshot.
+  - Opt-in HMAC-SHA256 pepper for API keys
+    (`EGG_API_KEY_PEPPER`). Legacy SHA-256 keys still validate;
+    `rotate_api_key` upgrades them in place.
+  - Removed the never-wired `quota_counters` / `quota_config`
+    tables.
+- **Sprint 5 — contract + mapper refactor** (S5.1 – S5.10):
+  - `typing.Literal` aliases replace `_VALID_*` sets
+    (`PublicAuthMode`, `CorsMode`, `SameSite`, `Criticality`,
+    `MappingMode`, `BackendType`).
+  - `SchemaMapper._apply_mode` is now a dict dispatch over nine
+    named handlers — adding a new mode is additive.
+  - `ElasticsearchAdapter` now forwards the bound request_id as
+    `X-Opaque-Id` to every backend call.
+  - `/v1/search?format=csv` returns a flat, spreadsheet-friendly
+    CSV export.
+  - OpenAPI path snapshot test locks the public contract.
+- **Sprint 6 — observability + ops pack** (S6.1 – S6.9):
+  - Opt-in OpenTelemetry (via `EGG_OTEL_ENDPOINT`) — FastAPI +
+    httpx auto-instrumented, `traceparent` propagated. Structlog
+    processor injects `trace_id` / `span_id` into every event.
+  - `GET /admin/v1/debug/translate` returns normalized query,
+    cache key and backend DSL without touching the backend.
+  - `ops/prometheus/alerts.yml`, `ops/grafana/egg-api-overview.json`,
+    `ops/RUNBOOK.md`, `deploy/k8s/egg-api.yaml`,
+    `scripts/locustfile.py`.
+- **Sprint 7 — architecture + extensibility** (S7.1 – S7.7):
+  - `BackendAdapter` runtime-checkable Protocol.
+  - Adapter factory dispatches on `backend.type`.
+  - `OpenSearchAdapter` (drop-in compatible, version floor 1.x).
+  - Four store role Protocols (`KeyStore`, `SessionStore`,
+    `UsageLogger`, `StatsReporter`).
+  - `app.state.container` + `get_container(request)` helper for
+    `Depends`-based access (singleton stays as fallback).
+  - `pytest-xdist` supported, parallel run time ~11 s.
+  - `docs/backends.md` backend authoring guide.
+- **Sprint 8 — advanced functional** (S8.1 – S8.6):
+  - `search_after` cursor pagination with an opaque base64url
+    token. `NormalizedQuery.cursor` bypasses `max_depth`;
+    `SearchResponse.next_cursor` is emitted on full pages.
+  - `GET /v1/auth/whoami` for caller introspection.
+  - `GET /v1/suggest` (match_phrase_prefix on `title`).
+  - JSON-LD response flavor on `/v1/records/{id}` (Accept header)
+    and `/v1/search?format=jsonld`.
+  - Opt-in Redis rate limiter
+    (`EGG_RATE_LIMIT_REDIS_URL`, `[redis]` extra) with fail-open
+    semantics.
+
+### Changed
+
+- Default cookie posture tightened: `admin_cookie_secure=True`,
+  `admin_cookie_samesite=strict`.
+- FastAPI app attaches `configure_tracing(app)` and
+  `ProxyHeadersMiddleware` *before* the routers are registered so
+  instrumentation sees every endpoint.
+- `Container.adapter` is typed as `BackendAdapter` Protocol and
+  closed via `getattr(previous_adapter, "client", None)` so future
+  backends without an `httpx.Client` work unchanged.
+- Rate limiters are built through `build_rate_limiter(scope=…)` so
+  the in-memory and Redis-backed flavours are pin-compatible.
+
+### Fixed
+
+- Every item flagged in the original audit has been either
+  addressed or explicitly deferred with tracking — see
+  `docs/post-audit.md`.
+
+## [0.1.0] — initial MVP (pre-audit)
+
+Baseline feature set kept for reference. Items below were delivered
+across the "vague" hardening passes (C1-C6, H1-H11, M1-M9, L1-L4)
+before the sprint series started. See the 0.1.0 commit trail for
+detail.
 
 ### Added
 
 - **Observability** — Prometheus metrics on `GET /metrics`
   (`egg_requests_total`, `egg_request_duration_seconds`,
-  `egg_backend_errors_total`, `egg_rate_limit_hits_total`). Structured
-  JSON logs via `structlog`, with `request_id` / `key_id` / `latency_ms`
-  bound per request.
+  `egg_backend_errors_total`, `egg_rate_limit_hits_total`).
+  Structured JSON logs via `structlog`, with `request_id` /
+  `key_id` / `latency_ms` bound per request.
 - **Caching** — `Cache-Control` + strong `ETag` on `/v1/search`,
-  `/v1/records/{id}`, `/v1/facets` with `If-None-Match` → `304` fast path
-  (configurable via `CacheConfig`).
-- **Security** — CORS middleware driven by `CorsConfig`; security-headers
-  middleware sets `X-Content-Type-Options`, `Referrer-Policy`,
-  `X-Frame-Options`, CSP on `/admin`, and HSTS in production.
-- **Security** — Admin login brute-force guard (dedicated
-  `InMemoryRateLimiter` keyed by client IP, 10 attempts / 5 min by default).
-- **Security** — Admin UI sessions gain an `expires_at` column (TTL 12 h
-  by default, configurable); expired tokens are rejected and purged on
-  read.
-- **Optional endpoints** — `GET /v1/collections` and `GET /v1/schema`
-  (SPECS §12.1 / §12.4). `GET /v1/suggest` and `GET /v1/manifest/{id}`
-  (§12.2 / §12.3) are declared and return `501 not_implemented` until
-  backend plumbing lands.
-- **Admin API** — `GET /admin/v1/usage` paginated listing
-  (`limit` + `offset`, validated via FastAPI `Query`).
-- **Backend** — Bounded retries with exponential backoff in the
-  Elasticsearch adapter; typed `backend_unavailable` error on exhaustion.
-  ES minor-version gate rejects versions older than 7.
+  `/v1/records/{id}`, `/v1/facets` with `If-None-Match` → `304`
+  fast path.
+- **Security** — CORS middleware driven by `CorsConfig`;
+  security-headers middleware sets `X-Content-Type-Options`,
+  `Referrer-Policy`, `X-Frame-Options`, CSP on `/admin`, and HSTS
+  in production.
+- **Security** — Admin login brute-force guard.
+- **Security** — Admin UI sessions gain an `expires_at` column.
+- **Optional endpoints** — `GET /v1/collections`, `GET /v1/schema`.
+- **Admin API** — `GET /admin/v1/usage` paginated.
+- **Backend** — Bounded retries with exponential backoff; ES
+  minor-version gate rejects versions older than 7.
 
 ### Changed
 
-- **Security** — Bootstrap admin key is now generated on first run in
-  development (stored in a 0600 sidecar file) and required via env var or
-  config in production. The legacy `"admin-change-me"` default is refused
-  and auto-regenerated.
-- **Security** — Admin session cookie defaults to `Secure=True` +
-  `SameSite=strict`; both flags are configurable via `AuthConfig`.
-- **Security** — `usage_audit_middleware` resolves the raw API key to its
-  `key_id` label and never persists or logs the secret.
-- **Security** — `ConfigManager.save()` strips `auth.bootstrap_admin_key`
-  before writing YAML so secrets cannot leak through config backups.
-- **Security** — Admin UI pages are rendered through Jinja2 templates with
-  explicit autoescape instead of f-string HTML concatenation.
-- **Backend** — `/v1/search` now issues a single backend call, deriving
-  facet counts from the same payload (previous implementation made a
-  second request).
-- **Query policy** — `page` and `page_size` parse errors surface as
-  `invalid_parameter` (400). `_parse_bool` strips whitespace and accepts
-  `on`/`off` synonyms.
-- **Query policy** — `QueryPolicyEngine.compute_cache_key` was migrated to
-  a stable JSON + SHA-256 hash (previous implementation used a Pydantic v2
-  kwarg that did not exist).
-- **Validation** — `AppConfig` gains cross-field validators:
-  `security_profile`, `auth.public_mode`, `cors.mode`,
-  `allowed_include_fields` coverage, and required/recommended mapping rules
-  must declare a source.
-- **Mapper** — `date_parser` and `url_passthrough` are defensive: invalid
-  values return `None` and are logged; URL passthrough validates scheme and
-  netloc.
-- **Mapper** — `raw_fields` exposure strips any backend-internal key
-  prefixed with `_`.
-- **Adapter** — `ElasticsearchAdapter.translate_query` honours the active
-  profile's `max_buckets_per_facet` (no more hardcoded 20).
-- **Backend** — `httpx.Client` is instantiated with
-  `follow_redirects=False`.
-- **Storage** — Hot-path indexes on `api_keys(key_hash)`,
-  `usage_events(timestamp DESC)`, `usage_events(subject)`,
-  `usage_events(status_code)`, `quota_counters(subject)`,
-  `ui_sessions(expires_at)`.
-- **Admin UI** — Key labels must match `^[a-zA-Z0-9_.-]{1,64}$`.
+- **Security** — Bootstrap admin key is generated on first run in
+  development and required via env var in production.
+- **Security** — `usage_audit_middleware` resolves raw API keys to
+  their `key_id` label.
+- **Security** — `ConfigManager.save()` strips
+  `auth.bootstrap_admin_key` before writing YAML.
+- **Validation** — `AppConfig` cross-field validators.
+- **Mapper** — `date_parser` / `url_passthrough` defensive;
+  `raw_fields` exposure strips backend-internal keys.
+- **Backend** — `httpx.Client` uses `follow_redirects=False`.
+- **Storage** — Hot-path indexes on `api_keys`, `usage_events`,
+  `ui_sessions`.
+- **Admin UI** — Key labels must match
+  `^[a-zA-Z0-9_.-]{1,64}$`.
 
 ### Fixed
 
-- `QueryPolicyEngine.compute_cache_key` no longer raises on every call
-  (regression introduced with Pydantic v2).
+- `QueryPolicyEngine.compute_cache_key` no longer raises
+  (Pydantic v2 regression).
 
 ### Internal
 
-- `Container.reload()` is now serialized by a `threading.RLock` to avoid
-  races between concurrent config updates.
-- Tests: six dedicated suites covering every change landed above
-  (`tests/security/test_vague1_hardening.py` through
-  `tests/security/test_vague5_spec.py`), plus gap tests for CORS and
-  empty-result handling.
+- `Container.reload()` serialized by a `threading.RLock`.

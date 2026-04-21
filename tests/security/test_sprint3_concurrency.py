@@ -172,10 +172,14 @@ async def test_s3_8_event_loop_stays_responsive_under_load() -> None:
         ticks = await ticker
 
     assert all(r.status_code == 200 for r in responses)
-    # Liberal threshold: if the middleware blocked the loop for 1 ms per
-    # request, 50 requests = ~50 ms of starvation; the ticker should still
-    # tick many times. A busted implementation showing 0-1 ticks would fail.
-    assert ticks >= 3, f"ticker fired only {ticks} times — loop looks blocked"
+    # The ticker sleeps 5 ms between increments. On a healthy event loop
+    # 50 concurrent /v1/livez calls should complete in ≤ a few hundred
+    # milliseconds, so the ticker has plenty of room to fire >= 20 times.
+    # A middleware that blocks the loop for ~15 ms/request would produce
+    # 50*15 = 750 ms of starvation and drop the tick count well below
+    # that floor — the previous >= 3 threshold was too lax to catch
+    # real regressions.
+    assert ticks >= 20, f"ticker fired only {ticks} times — loop looks blocked"
 
 
 @pytest.mark.asyncio

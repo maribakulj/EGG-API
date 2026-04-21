@@ -9,12 +9,20 @@ and we never import it if OTel is disabled.
 Rationale: tracing is an operator concern, not part of the MVP contract.
 Pinning hard OTel dependencies on every EGG install would balloon the
 runtime image and force a collector endpoint even for dev smoke tests.
+
+State shape:
+  The tracing state (instrumented? enabled?) lives in a ``_TracingState``
+  object, not at module scope. A ``reset_for_tests()`` helper restores
+  the initial state so tests that install/uninstall OTel across cases
+  do not need to ``sys.modules.pop("app.tracing")`` — they can call
+  ``reset_for_tests()`` instead.
 """
 
 from __future__ import annotations
 
 import logging
 import os
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 # Local stdlib logger: importing app.logging here would create a cycle
@@ -24,13 +32,36 @@ logger = logging.getLogger("egg.tracing")
 if TYPE_CHECKING:  # pragma: no cover - import-only typing aid
     from fastapi import FastAPI
 
-_INSTRUMENTED = False
-_ENABLED = False
+
+@dataclass
+class _TracingState:
+    instrumented: bool = False
+    enabled: bool = False
+
+
+# Module-scoped holder. Still a single instance — but swapping the
+# dataclass out via ``reset_for_tests()`` is cleaner than rebinding two
+# booleans, and ``is_enabled()`` / the structlog processor read through
+# the holder so they always see the current value.
+_state = _TracingState()
 
 
 def is_enabled() -> bool:
     """Return True when configure_tracing() has installed OTel on the app."""
-    return _ENABLED
+    return _state.enabled
+
+
+def reset_for_tests() -> None:
+    """Revert the module to its uninstalled state.
+
+    For tests only. Production code never needs to call this — the real
+    instrumentation is installed exactly once at startup. Tests that
+    toggle the OTel env var between cases should call this to drop the
+    cached ``instrumented`` flag instead of reaching for
+    ``sys.modules.pop``.
+    """
+    global _state
+    _state = _TracingState()
 
 
 def _otel_endpoint() -> str | None:
@@ -46,13 +77,12 @@ def configure_tracing(app: FastAPI) -> bool:
     opt-in env var was unset or the optional dependencies are not
     importable.
     """
-    global _INSTRUMENTED, _ENABLED
-    if _INSTRUMENTED:
-        return _ENABLED
+    if _state.instrumented:
+        return _state.enabled
 
     endpoint = _otel_endpoint()
     if endpoint is None:
-        _INSTRUMENTED = True
+        _state.instrumented = True
         logger.info("tracing_disabled: no EGG_OTEL_ENDPOINT / OTEL_EXPORTER_OTLP_ENDPOINT set")
         return False
 
@@ -65,7 +95,7 @@ def configure_tracing(app: FastAPI) -> bool:
         from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry.sdk.trace.export import BatchSpanProcessor
     except ImportError as exc:
-        _INSTRUMENTED = True
+        _state.instrumented = True
         logger.warning("tracing_disabled: opentelemetry not installed (%s)", exc)
         return False
 
@@ -79,8 +109,8 @@ def configure_tracing(app: FastAPI) -> bool:
     FastAPIInstrumentor.instrument_app(app)
     HTTPXClientInstrumentor().instrument()
 
-    _INSTRUMENTED = True
-    _ENABLED = True
+    _state.instrumented = True
+    _state.enabled = True
     logger.info("tracing_enabled endpoint=%s service_name=%s", endpoint, service_name)
     return True
 
@@ -91,7 +121,7 @@ def current_trace_and_span_ids() -> tuple[str | None, str | None]:
     Safe to call whether OTel is installed or not — falls back to ``None``
     when the import fails or no span is active.
     """
-    if not _ENABLED:
+    if not _state.enabled:
         return None, None
     try:
         from opentelemetry import trace

@@ -53,6 +53,24 @@ rate_limit_hits = Counter(
     registry=registry,
 )
 
+# Silent-failure visibility: pre-Sprint-10 two fail-open paths swallowed
+# errors without surfacing a metric — a broken Redis or a corrupted
+# SQLite could go unnoticed until traffic spiked. These counters let
+# the Prometheus alerts notice.
+
+rate_limit_redis_errors = Counter(
+    "egg_rate_limit_redis_errors_total",
+    "Redis errors swallowed by the rate limiter's fail-open path.",
+    labelnames=("scope",),
+    registry=registry,
+)
+
+usage_persist_errors = Counter(
+    "egg_usage_persist_errors_total",
+    "Failures while writing a usage_events row from the audit middleware.",
+    registry=registry,
+)
+
 
 def render_latest() -> tuple[bytes, str]:
     """Return (body, content-type) for the ``/metrics`` endpoint response."""

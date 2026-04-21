@@ -116,11 +116,11 @@ def storage_stats() -> dict[str, object]:
     Intended for capacity planning and retention sanity checks. No secret
     material is returned — only structural counters and aggregate bytes.
     """
-    from app.main import _last_purge_state
-
     stats = container.store.storage_stats()
     cfg = container.config_manager.config.storage
-    stats["last_purge"] = dict(_last_purge_state)
+    # Sprint 10 cleanup: read the purge snapshot off the container
+    # instead of reaching back into app.main.
+    stats["last_purge"] = dict(container.last_purge_state)
     stats["retention_days"] = cfg.usage_events_retention_days
     stats["purge_interval_seconds"] = cfg.purge_interval_seconds
     return stats

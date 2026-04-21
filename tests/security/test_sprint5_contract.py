@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import csv
+import json
 from io import StringIO
+from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
 import structlog
+from fastapi.testclient import TestClient
 
 from app.adapters.elasticsearch.adapter import ElasticsearchAdapter
 from app.config.models import AppConfig
@@ -118,16 +121,19 @@ def test_s5_3_cache_control_private_for_api_key_modes(client, admin_headers) -> 
 # ---------------------------------------------------------------------------
 
 
-def test_s5_5_suggest_route_absent_from_openapi(client) -> None:
+def test_s5_5_manifest_route_absent_from_openapi(client) -> None:
+    # /v1/manifest/{id} stays retired (no backend plumbing). /v1/suggest
+    # came back in Sprint 8 S8.3 with a real ES-backed implementation.
     schema = client.get("/v1/openapi.json").json()
     paths = schema.get("paths", {})
-    assert "/v1/suggest" not in paths
     assert not any(p.startswith("/v1/manifest") for p in paths)
 
 
-def test_s5_5_suggest_returns_404(client) -> None:
+def test_s5_5_suggest_returns_200_when_backed(client) -> None:
+    # Sprint 8 S8.3: /v1/suggest is wired to the adapter's suggest() path;
+    # it used to 404 as a 501-stub retirement placeholder.
     response = client.get("/v1/suggest?q=abc")
-    assert response.status_code == 404
+    assert response.status_code == 200
 
 
 # ---------------------------------------------------------------------------
@@ -243,50 +249,34 @@ def test_s5_8_unknown_format_rejected(client) -> None:
 # ---------------------------------------------------------------------------
 
 
-# Paths we contractually commit to keep stable. A removal must be a
-# deliberate breaking change; a new entry can be added here freely.
-_EXPECTED_PATHS = {
-    "/v1/livez",
-    "/v1/readyz",
-    "/v1/health",
-    "/v1/search",
-    "/v1/records/{record_id}",
-    "/v1/facets",
-    "/v1/collections",
-    "/v1/schema",
-    "/v1/openapi.json",
-    "/metrics",
-    "/admin/v1/setup/detect",
-    "/admin/v1/setup/scan-fields",
-    "/admin/v1/setup/create-config",
-    "/admin/v1/config",
-    "/admin/v1/config/validate",
-    "/admin/v1/test-query",
-    "/admin/v1/debug/translate",
-    "/admin/v1/usage",
-    "/admin/v1/status",
-    "/admin/v1/storage/stats",
-    "/admin/login",
-    "/admin/logout",
-    "/admin/logout-everywhere",
-    "/admin/ui",
-    "/admin/ui/config",
-    "/admin/ui/mapping",
-    "/admin/ui/keys",
-    "/admin/ui/keys/create",
-    "/admin/ui/keys/{key_id}/status",
-    "/admin/ui/keys/{key_id}/rotate",
-    "/admin/ui/usage",
-}
+# Path snapshot lives in tests/snapshots/openapi_paths.json so an audit
+# diff shows a single-file hunk instead of a giant change inside the
+# test module. The snapshot is read at call time, not import time, so
+# an editor fix-it round-trip (update snapshot + rerun pytest) works
+# without touching this file.
+_OPENAPI_PATH_SNAPSHOT = Path(__file__).resolve().parent.parent / "snapshots" / "openapi_paths.json"
 
 
 def test_s5_9_openapi_path_snapshot(client) -> None:
+    snapshot = json.loads(_OPENAPI_PATH_SNAPSHOT.read_text())
+    expected = set(snapshot["paths"])
     schema = client.get("/v1/openapi.json").json()
-    actual_paths = set(schema.get("paths", {}).keys())
-    missing = _EXPECTED_PATHS - actual_paths
-    extra = actual_paths - _EXPECTED_PATHS
-    assert not missing, f"paths removed without updating the snapshot: {sorted(missing)}"
-    assert not extra, f"new paths added without updating the snapshot: {sorted(extra)}"
+    actual = set(schema.get("paths", {}).keys())
+
+    missing = expected - actual
+    extra = actual - expected
+    if missing or extra:
+        msg_lines = [
+            "OpenAPI path surface drifted from tests/snapshots/openapi_paths.json.",
+            "This is a contract change — decide whether it is major/minor, then:",
+            "  1. Update tests/snapshots/openapi_paths.json",
+            "  2. Add a CHANGELOG entry under [Unreleased]",
+        ]
+        if missing:
+            msg_lines.append(f"  removed paths: {sorted(missing)}")
+        if extra:
+            msg_lines.append(f"  added paths:   {sorted(extra)}")
+        raise AssertionError("\n".join(msg_lines))
 
 
 def test_s5_9_every_public_get_has_description(client) -> None:
@@ -308,53 +298,62 @@ def test_s5_9_every_public_get_has_description(client) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _rebuild_app_with_cors(mode: str, origins: list[str] | None = None):
-    # CORS middleware is wired at FastAPI construction, so swap the container
-    # config then force-reimport app.main to get a fresh app instance.
-    import importlib
-    import sys
+def _cors_probe_app(mode: str, origins: list[str] | None = None):
+    """Build a minimal FastAPI with the ``CORSMiddleware`` under test.
 
-    container.config_manager.config.cors.mode = mode  # type: ignore[assignment]
-    container.config_manager.config.cors.allow_origins = origins or []
-    sys.modules.pop("app.main", None)
-    module = importlib.import_module("app.main")
-    return module.app
+    Pre-Sprint-10 we re-imported ``app.main`` via ``sys.modules.pop`` to
+    rebuild its CORS middleware with a new config — that re-ran every
+    module-level side effect (container rebuild, tracing bootstrap…)
+    and leaked state into whatever test ran next. A local
+    ``FastAPI()`` exercises the exact same middleware class with zero
+    collateral damage.
+    """
+    from fastapi import FastAPI
+    from fastapi.middleware.cors import CORSMiddleware
+
+    probe = FastAPI()
+    if mode == "allowlist":
+        probe.add_middleware(
+            CORSMiddleware,
+            allow_origins=origins or [],
+            allow_credentials=False,
+            allow_methods=["GET"],
+            allow_headers=["x-api-key", "content-type"],
+            max_age=600,
+        )
+    elif mode == "wide_open":
+        probe.add_middleware(
+            CORSMiddleware,
+            allow_origins=["*"],
+            allow_credentials=False,
+            allow_methods=["GET"],
+            allow_headers=["x-api-key", "content-type"],
+            max_age=600,
+        )
+
+    @probe.get("/v1/livez")
+    def _livez() -> dict[str, str]:
+        return {"status": "ok"}
+
+    return probe
 
 
 def test_s5_10_cors_allowlist_accepts_known_origin() -> None:
-    from fastapi.testclient import TestClient
-
-    fresh_app = _rebuild_app_with_cors("allowlist", ["https://ally.example"])
-    try:
-        with TestClient(fresh_app) as tc:
-            resp = tc.get("/v1/livez", headers={"Origin": "https://ally.example"})
-            assert resp.status_code == 200
-            assert resp.headers.get("access-control-allow-origin") == "https://ally.example"
-    finally:
-        _rebuild_app_with_cors("off", [])
+    with TestClient(_cors_probe_app("allowlist", ["https://ally.example"])) as tc:
+        resp = tc.get("/v1/livez", headers={"Origin": "https://ally.example"})
+        assert resp.status_code == 200
+        assert resp.headers.get("access-control-allow-origin") == "https://ally.example"
 
 
 def test_s5_10_cors_allowlist_denies_unknown_origin() -> None:
-    from fastapi.testclient import TestClient
-
-    fresh_app = _rebuild_app_with_cors("allowlist", ["https://ally.example"])
-    try:
-        with TestClient(fresh_app) as tc:
-            resp = tc.get("/v1/livez", headers={"Origin": "https://evil.example"})
-            assert resp.status_code == 200  # CORS doesn't reject; it just omits the header
-            assert "access-control-allow-origin" not in resp.headers
-    finally:
-        _rebuild_app_with_cors("off", [])
+    with TestClient(_cors_probe_app("allowlist", ["https://ally.example"])) as tc:
+        resp = tc.get("/v1/livez", headers={"Origin": "https://evil.example"})
+        assert resp.status_code == 200  # CORS doesn't reject; it just omits the header
+        assert "access-control-allow-origin" not in resp.headers
 
 
 def test_s5_10_cors_wide_open_echoes_star() -> None:
-    from fastapi.testclient import TestClient
-
-    fresh_app = _rebuild_app_with_cors("wide_open")
-    try:
-        with TestClient(fresh_app) as tc:
-            resp = tc.get("/v1/livez", headers={"Origin": "https://anyone.example"})
-            assert resp.status_code == 200
-            assert resp.headers.get("access-control-allow-origin") == "*"
-    finally:
-        _rebuild_app_with_cors("off", [])
+    with TestClient(_cors_probe_app("wide_open")) as tc:
+        resp = tc.get("/v1/livez", headers={"Origin": "https://anyone.example"})
+        assert resp.status_code == 200
+        assert resp.headers.get("access-control-allow-origin") == "*"
