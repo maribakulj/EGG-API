@@ -79,7 +79,7 @@ def build_rate_limiter(
     if not url:
         return InMemoryRateLimiter(max_requests=max_requests, window_seconds=window_seconds)
     try:
-        import redis  # noqa: F401  (dynamic opt-in import)
+        import redis
     except ImportError:
         logger.warning(
             "EGG_RATE_LIMIT_REDIS_URL set but 'redis' package is not installed; "

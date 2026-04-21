@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
+from app import __version__
 from app.admin_api.routes import router as admin_router
 from app.admin_ui.routes import router as admin_ui_router
 from app.dependencies import container
@@ -114,7 +115,7 @@ async def _lifespan(_: FastAPI):
 _PROD = is_production()
 app = FastAPI(
     title="EGG-API",
-    version="0.1.0",
+    version=__version__,
     docs_url=None if _PROD else "/docs",
     redoc_url=None if _PROD else "/redoc",
     openapi_url=None if _PROD else "/openapi.json",

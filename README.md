@@ -60,19 +60,21 @@ No terminal, no YAML hand-editing, no DevOps rotation. Install, configure, expos
 
 | Area | What you get |
 | --- | --- |
-| **Public API** | `GET /v1/search`, `/v1/records/{id}`, `/v1/facets`, `/v1/collections`, `/v1/schema`, `/v1/health`, `/v1/openapi.json` |
-| **Optional endpoints** | `/v1/suggest` and `/v1/manifest/{id}` declared and return `501 not_implemented` (SPECS §12) |
-| **Query policy** | Unknown-param rejection, sort/facet/field allowlists, hard caps on page size and pagination depth, strict boolean parsing |
-| **Mapping** | 8 modes (`direct`, `split_list`, `first_non_empty`, `template`, `nested_object`, `date_parser`, `boolean_cast`, `url_passthrough`) with defensive parsing |
-| **Caching** | `Cache-Control: public, max-age=<ttl>` + strong `ETag` + `If-None-Match` → `304` on all read endpoints |
+| **Public API** | `GET /v1/search`, `/v1/records/{id}`, `/v1/facets`, `/v1/suggest`, `/v1/collections`, `/v1/schema`, `/v1/auth/whoami`, `/v1/livez`, `/v1/readyz`, `/v1/openapi.json` |
+| **Response formats** | JSON default; `?format=csv` on `/v1/search`; JSON-LD via `Accept: application/ld+json` or `?format=jsonld` |
+| **Pagination** | `page` + `page_size` under `max_depth`; opaque `cursor` (base64 of `search_after`) above it, with `next_cursor` in the response |
+| **Query policy** | Unknown-param rejection, sort/facet/field allowlists, hard caps on `q`/filter/`include_fields`, strict boolean parsing |
+| **Mapping** | 9 modes (`direct`, `constant`, `split_list`, `first_non_empty`, `template`, `nested_object`, `date_parser`, `boolean_cast`, `url_passthrough`) with dispatch-dict handlers |
+| **Caching** | `Cache-Control` + strong `ETag` + `If-None-Match` → `304`; `private` when auth is required, `public` when anonymous is allowed |
 | **Security profiles** | Ship with `prudent` and `standard`; add your own via config |
-| **Auth modes** | Public endpoints: `anonymous_allowed` / `api_key_optional` / `api_key_required`; Admin: API key always required |
-| **Rate limiting** | Per-subject sliding window for public traffic; dedicated per-IP limiter on `/admin/login` (brute-force protection) |
-| **Security headers** | `X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options` + CSP on `/admin`, HSTS in production, CORS off by default |
-| **Admin UI** | Jinja2 templates (autoescape enforced) for dashboard, config editor, mapping overview, API key management, recent activity |
-| **Admin API** | Config CRUD, validation, test-query (DSL preview), paginated `/admin/v1/usage` |
-| **Observability** | Prometheus `/metrics` (requests, latency, backend errors, rate-limit hits), structured JSON logs with `request_id` / `key_id` / `latency_ms` |
-| **Storage** | SQLite state DB with hot-path indexes; idempotent schema migrations |
+| **Auth modes** | Public: `anonymous_allowed` / `api_key_optional` / `api_key_required`; Admin: API key always required; optional HMAC pepper for stored hashes (`EGG_API_KEY_PEPPER`) |
+| **Rate limiting** | Per-subject limiter for public traffic (in-memory by default, Redis opt-in via `EGG_RATE_LIMIT_REDIS_URL`); dedicated per-IP limiter on `/admin/login` |
+| **Security headers** | `X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options` + CSP on `/admin`, HSTS in production, CORS off by default; `/docs` hidden in production |
+| **Admin UI** | Jinja2 autoescape, CSRF double-submit on every POST, rotate + revoke + sign-out-everywhere flows |
+| **Admin API** | Config CRUD, validation, test-query + `/admin/v1/debug/translate` (DSL preview), paginated `/admin/v1/usage`, `/admin/v1/storage/stats` |
+| **Observability** | Prometheus `/metrics` (auth-gated in prod), structured JSON logs with `request_id` / `key_id` / `trace_id` / `span_id` / `latency_ms`; opt-in OpenTelemetry via `EGG_OTEL_ENDPOINT` |
+| **Storage** | SQLite state DB with hot-path indexes; versioned migrations (`egg-api migrate`); background retention purge |
+| **Backends** | Elasticsearch (7+) or OpenSearch (1+) via `backend.type`; `BackendAdapter` Protocol for adding new backends (see `docs/backends.md`) |
 
 ---
 

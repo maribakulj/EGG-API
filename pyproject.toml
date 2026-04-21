@@ -1,6 +1,6 @@
 [project]
 name = "egg-api"
-version = "0.1.0"
+version = "1.0.0"
 description = "EGG-API: safe, normalized API facade for GLAM search backends"
 readme = "README.md"
 requires-python = ">=3.10"
