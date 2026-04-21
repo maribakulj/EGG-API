@@ -130,6 +130,12 @@ if _trusted:
     trusted_hosts = "*" if _trusted == ["*"] else ",".join(_trusted)
     app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=trusted_hosts)
 
+# Expose the container on ``app.state`` so handlers/tests can take it via
+# ``Depends(get_container)`` (see app.dependencies.get_container) instead of
+# the module-level singleton. The singleton stays as a back-compat path —
+# new code should prefer the Depends flavor to keep routes injectable.
+app.state.container = container
+
 # Wire OpenTelemetry traces/spans if configured. No-op when neither
 # EGG_OTEL_ENDPOINT nor OTEL_EXPORTER_OTLP_ENDPOINT is set. Must run before
 # the routers are attached so the instrumentation sees every endpoint.

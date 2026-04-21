@@ -4,7 +4,8 @@ import logging
 import sys
 import threading
 
-from app.adapters.elasticsearch.adapter import ElasticsearchAdapter
+from app.adapters.base import BackendAdapter
+from app.adapters.factory import build_adapter
 from app.auth.api_keys import ApiKeyManager
 from app.config.manager import ConfigManager
 from app.config.models import AppConfig
@@ -18,6 +19,8 @@ logger = logging.getLogger(__name__)
 
 
 class Container:
+    adapter: BackendAdapter
+
     def __init__(self) -> None:
         self._reload_lock = threading.RLock()
         self.config_manager = ConfigManager(require_existing=False)
@@ -45,16 +48,7 @@ class Container:
         self.mapper = SchemaMapper(config)
         self.mapping_health = MappingHealthService()
         self.policy = QueryPolicyEngine(config)
-        self.adapter = ElasticsearchAdapter(
-            config.backend.url,
-            config.backend.index,
-            timeout_seconds=config.backend.timeout_seconds,
-            max_retries=config.backend.max_retries,
-            retry_backoff_seconds=config.backend.retry_backoff_seconds,
-            retry_backoff_cap_seconds=config.backend.retry_backoff_cap_seconds,
-            retry_deadline_seconds=config.backend.retry_deadline_seconds,
-            max_buckets_per_facet=config.profiles[config.security_profile].max_buckets_per_facet,
-        )
+        self.adapter = build_adapter(config)
 
     def reload(self, config: AppConfig) -> None:
         with self._reload_lock:
@@ -74,26 +68,35 @@ class Container:
             self.mapper = SchemaMapper(config)
             self.policy = QueryPolicyEngine(config)
             previous_adapter = self.adapter
-            self.adapter = ElasticsearchAdapter(
-                config.backend.url,
-                config.backend.index,
-                timeout_seconds=config.backend.timeout_seconds,
-                max_retries=config.backend.max_retries,
-                retry_backoff_seconds=config.backend.retry_backoff_seconds,
-                retry_backoff_cap_seconds=config.backend.retry_backoff_cap_seconds,
-                retry_deadline_seconds=config.backend.retry_deadline_seconds,
-                max_buckets_per_facet=config.profiles[
-                    config.security_profile
-                ].max_buckets_per_facet,
-            )
+            self.adapter = build_adapter(config)
             # Release the old httpx client + its connection pool. If a handler
             # was still holding a reference it keeps working until it drops it,
             # but we stop leaking sockets/FDs across reloads.
             if previous_adapter is not None:
-                try:
-                    previous_adapter.client.close()
-                except Exception:
-                    logger.exception("previous_adapter_close_failed")
+                client = getattr(previous_adapter, "client", None)
+                if client is not None:
+                    try:
+                        client.close()
+                    except Exception:
+                        logger.exception("previous_adapter_close_failed")
 
 
 container = Container()
+
+
+def get_container(request: Request) -> Container:
+    """FastAPI ``Depends`` flavor of the module-level singleton.
+
+    Prefers ``request.app.state.container`` so tests that swap the
+    container on a fresh FastAPI instance don't leak across workers.
+    Falls back to the module-level singleton for callers that import
+    this helper outside of a request context (CLI, scripts).
+    """
+    state_container = getattr(request.app.state, "container", None)
+    if isinstance(state_container, Container):
+        return state_container
+    return container
+
+
+# Local import to keep ``Request`` out of module-level type-checking time.
+from fastapi import Request  # noqa: E402

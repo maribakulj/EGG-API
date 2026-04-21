@@ -24,7 +24,7 @@ MappingMode = Literal[
     "boolean_cast",
     "url_passthrough",
 ]
-BackendType = Literal["elasticsearch"]
+BackendType = Literal["elasticsearch", "opensearch"]
 
 
 class SecurityProfile(BaseModel):
