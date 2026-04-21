@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
-import tomllib
 import yaml
+
+# ``tomllib`` is stdlib from Python 3.11 onward. On 3.10 (still in the CI
+# matrix) we fall back to the ``tomli`` shim, which exposes the same API.
+if sys.version_info >= (3, 11):
+    import tomllib  # type: ignore[import-not-found]
+else:  # pragma: no cover - only hit on Python 3.10
+    import tomli as tomllib  # type: ignore[import-not-found, no-redef]
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 

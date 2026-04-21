@@ -26,7 +26,10 @@ dev = [
   "ruff>=0.6.0",
   "mypy>=1.11.0",
   "pre-commit>=3.8.0",
-  "types-PyYAML>=6.0.0"
+  "types-PyYAML>=6.0.0",
+  # Backport of the stdlib ``tomllib`` (stdlib since 3.11); pulled in
+  # only for 3.10 so test_sprint9_release can read pyproject.toml.
+  "tomli>=2.0.1; python_version < '3.11'"
 ]
 otel = [
   "opentelemetry-api>=1.27.0",
