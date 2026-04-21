@@ -31,12 +31,14 @@ def test_s7_1_opensearch_adapter_satisfies_protocol() -> None:
     assert isinstance(adapter, BackendAdapter)
 
 
-def test_s7_1_fake_adapter_from_conftest_satisfies_protocol() -> None:
-    # The test FakeAdapter lives in conftest and must stay in lockstep
-    # with the Protocol; a missing method should fail loudly here.
-    from tests.conftest import FakeAdapter
+def test_s7_1_fake_adapter_from_conftest_satisfies_protocol(client) -> None:
+    # The autouse ``reset_container`` fixture installs the conftest
+    # FakeAdapter on container.adapter — go through there so this test
+    # works whether or not ``tests`` is importable as a package on the
+    # current runner (it is not on GitHub Actions, by design).
+    from app.dependencies import container
 
-    assert isinstance(FakeAdapter(), BackendAdapter)
+    assert isinstance(container.adapter, BackendAdapter)
 
 
 # ---------------------------------------------------------------------------
