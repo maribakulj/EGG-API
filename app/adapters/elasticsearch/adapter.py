@@ -11,6 +11,8 @@ gating blocks Elasticsearch < 7.
 
 from __future__ import annotations
 
+import base64
+import json
 import random
 import time
 from typing import Any
@@ -24,6 +26,33 @@ from app.metrics import backend_errors
 from app.schemas.query import NormalizedQuery
 
 logger = get_logger("egg.adapter.es")
+
+
+def _encode_cursor(sort_values: list[Any]) -> str:
+    """Encode an ES sort tail into an opaque URL-safe cursor token.
+
+    The serialized shape is base64(json(sort_values)); cursors never
+    expose their internals on the wire so callers cannot craft arbitrary
+    ``search_after`` values.
+    """
+    raw = json.dumps(sort_values, separators=(",", ":"), default=str).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+
+
+def _decode_cursor(cursor: str) -> list[Any]:
+    padded = cursor + "=" * (-len(cursor) % 4)
+    try:
+        raw = base64.urlsafe_b64decode(padded.encode("ascii"))
+        value = json.loads(raw.decode("utf-8"))
+    except (ValueError, json.JSONDecodeError) as exc:
+        raise AppError(
+            "invalid_parameter",
+            "cursor token is malformed",
+            {"reason": "decode_failed"},
+        ) from exc
+    if not isinstance(value, list):
+        raise AppError("invalid_parameter", "cursor token is malformed", {"reason": "shape"})
+    return value
 
 
 def _current_request_id() -> str | None:
@@ -270,10 +299,16 @@ class ElasticsearchAdapter:
         size = size_override if size_override is not None else query.page_size
         bucket_size = max(1, int(bucket_size_default))
         body: dict[str, Any] = {
-            "from": (query.page - 1) * query.page_size,
             "size": size,
             "query": {"bool": {"must": must or [{"match_all": {}}], "filter": filter_clauses}},
         }
+        if query.cursor:
+            # search_after mode: stable over very deep scroll, tie-broken by
+            # _id so the order is total. ``from`` is forbidden in this mode.
+            body["search_after"] = _decode_cursor(query.cursor)
+            body["sort"] = [{"_id": "asc"}]
+        else:
+            body["from"] = (query.page - 1) * query.page_size
         if include_aggs and query.facets:
             body["aggs"] = {
                 facet: {"terms": {"field": facet, "size": bucket_size}} for facet in query.facets
@@ -328,6 +363,47 @@ class ElasticsearchAdapter:
             buckets = values.get("buckets", []) if isinstance(values, dict) else []
             result[facet] = {b["key"]: b["doc_count"] for b in buckets}
         return result
+
+    def suggest(self, prefix: str, limit: int = 10) -> list[str]:
+        """Term-level completion via ``simple_query_string`` prefix.
+
+        We intentionally avoid the ``completion`` suggester (requires a
+        dedicated mapping the operator may not have declared) and fall
+        back to a prefix-match query on ``title``. Returns distinct
+        titles, capped at ``limit``. Empty ``prefix`` → no suggestions.
+        """
+        if not prefix:
+            return []
+        size = max(1, min(int(limit), 50))
+        body = {
+            "size": size,
+            "_source": ["title"],
+            "query": {"match_phrase_prefix": {"title": prefix}},
+        }
+        response = self._request(
+            "POST",
+            f"{self.base_url}/{self.index}/_search",
+            json=body,
+            headers=_tracing_headers(),
+        )
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise AppError(
+                "backend_unavailable",
+                "Backend suggest failed",
+                {"reason": str(exc), "status_code": response.status_code},
+                503,
+            ) from exc
+        hits = response.json().get("hits", {}).get("hits", [])
+        seen: set[str] = set()
+        out: list[str] = []
+        for hit in hits:
+            title = hit.get("_source", {}).get("title")
+            if isinstance(title, str) and title not in seen:
+                seen.add(title)
+                out.append(title)
+        return out
 
     def get_facets(self, query: NormalizedQuery) -> dict[str, dict[str, int]]:
         """Aggregations-only search (size=0) — use for the /v1/facets endpoint."""

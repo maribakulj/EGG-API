@@ -15,6 +15,10 @@ class NormalizedQuery(BaseModel):
     date_to: str | None = None
     has_digital: bool | None = None
     has_iiif: bool | None = None
+    # Cursor pagination. When set, the adapter emits an ES ``search_after``
+    # clause instead of ``from + size``, bypassing the ``max_depth`` limit.
+    # The token is opaque on the wire — only the server encodes/decodes it.
+    cursor: str | None = None
 
     def depth(self) -> int:
         return self.page * self.page_size

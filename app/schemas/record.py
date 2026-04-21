@@ -94,3 +94,7 @@ class SearchResponse(BaseModel):
     page_size: int
     results: list[Record]
     facets: dict[str, dict[str, int]] = Field(default_factory=dict)
+    # Opaque URL-safe token. Present when the backend returned a full page
+    # and cursor pagination is being used; ``None`` when callers are paging
+    # via ``page=`` or when the result set is exhausted.
+    next_cursor: str | None = None

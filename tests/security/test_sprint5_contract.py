@@ -118,16 +118,19 @@ def test_s5_3_cache_control_private_for_api_key_modes(client, admin_headers) -> 
 # ---------------------------------------------------------------------------
 
 
-def test_s5_5_suggest_route_absent_from_openapi(client) -> None:
+def test_s5_5_manifest_route_absent_from_openapi(client) -> None:
+    # /v1/manifest/{id} stays retired (no backend plumbing). /v1/suggest
+    # came back in Sprint 8 S8.3 with a real ES-backed implementation.
     schema = client.get("/v1/openapi.json").json()
     paths = schema.get("paths", {})
-    assert "/v1/suggest" not in paths
     assert not any(p.startswith("/v1/manifest") for p in paths)
 
 
-def test_s5_5_suggest_returns_404(client) -> None:
+def test_s5_5_suggest_returns_200_when_backed(client) -> None:
+    # Sprint 8 S8.3: /v1/suggest is wired to the adapter's suggest() path;
+    # it used to 404 as a 501-stub retirement placeholder.
     response = client.get("/v1/suggest?q=abc")
-    assert response.status_code == 404
+    assert response.status_code == 200
 
 
 # ---------------------------------------------------------------------------
@@ -254,6 +257,8 @@ _EXPECTED_PATHS = {
     "/v1/facets",
     "/v1/collections",
     "/v1/schema",
+    "/v1/suggest",
+    "/v1/auth/whoami",
     "/v1/openapi.json",
     "/metrics",
     "/admin/v1/setup/detect",

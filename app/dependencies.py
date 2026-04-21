@@ -11,7 +11,7 @@ from app.config.manager import ConfigManager
 from app.config.models import AppConfig
 from app.mappers.schema_mapper import MappingHealthService, SchemaMapper
 from app.query_policy.engine import QueryPolicyEngine
-from app.rate_limit.limiter import InMemoryRateLimiter
+from app.rate_limit.redis_limiter import build_rate_limiter
 from app.runtime_paths import get_state_db_path, resolve_bootstrap_admin_key
 from app.storage.sqlite_store import SQLiteStore
 
@@ -37,13 +37,15 @@ class Container:
                 "Set EGG_BOOTSTRAP_ADMIN_KEY to pin it across restarts.\n"
             )
         self.api_keys = ApiKeyManager(self.store, bootstrap_key)
-        self.rate_limiter = InMemoryRateLimiter(
+        self.rate_limiter = build_rate_limiter(
             max_requests=config.rate_limit.public_max_requests,
             window_seconds=config.rate_limit.public_window_seconds,
+            scope="public",
         )
-        self.login_rate_limiter = InMemoryRateLimiter(
+        self.login_rate_limiter = build_rate_limiter(
             max_requests=config.rate_limit.admin_login_max_requests,
             window_seconds=config.rate_limit.admin_login_window_seconds,
+            scope="admin_login",
         )
         self.mapper = SchemaMapper(config)
         self.mapping_health = MappingHealthService()
@@ -57,13 +59,15 @@ class Container:
             self.store.initialize()
             bootstrap_key, _ = resolve_bootstrap_admin_key(config.auth.bootstrap_admin_key)
             self.api_keys = ApiKeyManager(self.store, bootstrap_key)
-            self.rate_limiter = InMemoryRateLimiter(
+            self.rate_limiter = build_rate_limiter(
                 max_requests=config.rate_limit.public_max_requests,
                 window_seconds=config.rate_limit.public_window_seconds,
+                scope="public",
             )
-            self.login_rate_limiter = InMemoryRateLimiter(
+            self.login_rate_limiter = build_rate_limiter(
                 max_requests=config.rate_limit.admin_login_max_requests,
                 window_seconds=config.rate_limit.admin_login_window_seconds,
+                scope="admin_login",
             )
             self.mapper = SchemaMapper(config)
             self.policy = QueryPolicyEngine(config)

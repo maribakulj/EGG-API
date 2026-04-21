@@ -4,13 +4,14 @@ import csv
 import io
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, Header, Request, Response
 from fastapi.responses import PlainTextResponse
 
 from app.auth.dependencies import enforce_public_auth, require_admin_key
 from app.dependencies import container
 from app.errors import AppError
 from app.http_cache import apply_cache_headers
+from app.public_api.jsonld import JSONLD_MEDIA_TYPE, record_to_jsonld, search_to_jsonld
 from app.schemas.record import Record, SearchResponse
 
 router = APIRouter(prefix="/v1", tags=["public"])
@@ -103,10 +104,15 @@ def search(
     engine accepts and validates the parameter.
     """
     fmt = (request.query_params.get("format") or "json").lower()
-    if fmt not in {"json", "csv"}:
+    # Accept-header negotiation overrides only when ``format`` was left at
+    # the default — a caller with an explicit ``format=json`` still wins
+    # over their Accept header (principle of least surprise).
+    if fmt == "json" and JSONLD_MEDIA_TYPE in request.headers.get("accept", ""):
+        fmt = "jsonld"
+    if fmt not in {"json", "csv", "jsonld"}:
         raise AppError(
             "invalid_parameter",
-            "format must be one of json|csv",
+            "format must be one of json|csv|jsonld",
             {"format": fmt},
         )
 
@@ -137,23 +143,58 @@ def search(
 
     facets = container.adapter.extract_facets(payload) if nq.facets else {}
     total_value = payload.get("hits", {}).get("total", {}).get("value", len(results))
+    # Emit next_cursor when we returned a full page via search_after: the
+    # trailing hit's sort tail is the token for the next call. The encode
+    # helper is adapter-local; we reach for it lazily to keep the public
+    # route free of backend-specific imports.
+    next_cursor: str | None = None
+    if hits and len(hits) >= nq.page_size:
+        last_sort = hits[-1].get("sort")
+        if last_sort:
+            from app.adapters.elasticsearch.adapter import _encode_cursor
+
+            next_cursor = _encode_cursor(last_sort)
+    if fmt == "jsonld":
+        body_payload = search_to_jsonld(
+            results,
+            total=total_value,
+            page=nq.page,
+            page_size=nq.page_size,
+            facets=facets,
+            next_cursor=next_cursor,
+        )
+        jsonld_response = Response(
+            content=__import__("json").dumps(body_payload),
+            media_type=JSONLD_MEDIA_TYPE,
+        )
+        for header in ("Cache-Control", "ETag"):
+            if header in response.headers:
+                jsonld_response.headers[header] = response.headers[header]
+        return jsonld_response
     return SearchResponse(
         total=total_value,
         page=nq.page,
         page_size=nq.page_size,
         results=results,
         facets=facets,
+        next_cursor=next_cursor,
     )
 
 
-@router.get("/records/{record_id}", response_model=Record)
+@router.get("/records/{record_id}")
 def get_record(
     record_id: str,
     request: Request,
     response: Response,
     _: None = Depends(enforce_public_auth),
 ):
-    """Fetch a single record by identifier."""
+    """Fetch a single record by identifier.
+
+    Accepts ``application/ld+json`` via the ``Accept`` header to return a
+    JSON-LD projection of the record. The default flavor is the standard
+    JSON shape documented in the :class:`~app.schemas.record.Record`
+    component.
+    """
     etag = f'"record:{record_id}"'
     cached = apply_cache_headers(request, response, etag)
     if cached is not None:
@@ -164,7 +205,18 @@ def get_record(
     # map_record raises AppError("bad_gateway", 502) if the backend record
     # is missing a usable id; that surfaces as the right status without this
     # extra guard.
-    return container.mapper.map_record(raw)
+    record = container.mapper.map_record(raw)
+    if JSONLD_MEDIA_TYPE in request.headers.get("accept", ""):
+        body_payload = record_to_jsonld(record)
+        jsonld_response = Response(
+            content=__import__("json").dumps(body_payload),
+            media_type=JSONLD_MEDIA_TYPE,
+        )
+        for header in ("Cache-Control", "ETag"):
+            if header in response.headers:
+                jsonld_response.headers[header] = response.headers[header]
+        return jsonld_response
+    return record
 
 
 @router.get("/facets")
@@ -180,6 +232,62 @@ def facets(
     if cached is not None:
         return cached
     return {"facets": container.adapter.get_facets(nq)}
+
+
+@router.get("/suggest")
+def suggest(
+    request: Request,
+    _: None = Depends(enforce_public_auth),
+) -> dict[str, object]:
+    """Autocomplete suggestions for ``q`` (prefix match on title).
+
+    Returns up to ``limit`` (default 10, max 25) candidate strings. No
+    facets, no ranking surfacing. Re-added in Sprint 8 after being cut
+    in Sprint 5 for lacking backend plumbing.
+    """
+    prefix = (request.query_params.get("q") or "").strip()
+    if not prefix:
+        raise AppError("missing_parameter", "q is required", {"parameter": "q"})
+    try:
+        limit = int(request.query_params.get("limit", "10"))
+    except ValueError as exc:
+        raise AppError(
+            "invalid_parameter", "limit must be an integer", {"reason": str(exc)}
+        ) from exc
+    if limit < 1 or limit > 25:
+        raise AppError("invalid_parameter", "limit must be in [1, 25]", {"limit": limit})
+    suggestions = container.adapter.suggest(prefix, limit=limit)
+    return {"q": prefix, "suggestions": suggestions}
+
+
+@router.get("/auth/whoami")
+def whoami(
+    request: Request,
+    x_api_key: str | None = Header(default=None),
+) -> dict[str, object]:
+    """Return metadata about the API key carried on the current request.
+
+    Anonymous callers (no ``x-api-key``, or a key that failed validation)
+    get ``{"authenticated": false}`` — never an error. Authenticated
+    callers get their public ``key_id``, creation timestamp, and last
+    successful use. The raw secret is never echoed back.
+    """
+    identity = container.api_keys.get_identity(x_api_key) if x_api_key else None
+    if identity is None:
+        client_ip = request.client.host if request.client else "anonymous"
+        return {
+            "authenticated": False,
+            "subject": f"ip:{client_ip}",
+            "public_mode": container.config_manager.config.auth.public_mode,
+        }
+    return {
+        "authenticated": True,
+        "key_id": identity.key_id,
+        "status": identity.status,
+        "created_at": identity.created_at,
+        "last_used_at": identity.last_used_at,
+        "public_mode": container.config_manager.config.auth.public_mode,
+    }
 
 
 # ---------------------------------------------------------------------------

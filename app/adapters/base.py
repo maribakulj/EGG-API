@@ -72,6 +72,15 @@ class BackendAdapter(Protocol):
     def get_facets(self, query: NormalizedQuery) -> dict[str, dict[str, int]]:
         """Aggregations-only search used by the ``/v1/facets`` endpoint."""
 
+    def suggest(self, prefix: str, limit: int = 10) -> list[str]:
+        """Return completion candidates for ``prefix``.
+
+        Implementations that don't support a completion surface SHOULD
+        return an empty list; callers must not treat that as a failure.
+        Raising ``AppError('not_implemented', 501)`` is also acceptable
+        when the backend cannot provide the capability at all.
+        """
+
     # Response post-processing -------------------------------------------
     @staticmethod
     def extract_facets(payload: dict[str, Any]) -> dict[str, dict[str, int]]:

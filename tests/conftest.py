@@ -65,6 +65,13 @@ class FakeAdapter:
     def get_facets(self, query: NormalizedQuery) -> dict[str, dict[str, int]]:
         return {"type": {"object": 1}}
 
+    def suggest(self, prefix: str, limit: int = 10) -> list[str]:
+        # Deterministic suggestions for the contract tests; real adapters
+        # hit the backend's completion surface.
+        if not prefix:
+            return []
+        return [f"{prefix} result {i}" for i in range(min(limit, 3))]
+
     @staticmethod
     def extract_facets(payload: dict[str, Any]) -> dict[str, dict[str, int]]:
         aggs = payload.get("aggregations", {}) or {}
