@@ -21,6 +21,7 @@ import os
 import time
 from typing import Any
 
+from app.metrics import rate_limit_redis_errors
 from app.rate_limit.limiter import InMemoryRateLimiter
 
 logger = logging.getLogger("egg.rate_limit.redis")
@@ -61,9 +62,12 @@ class RedisRateLimiter:
             count, _ = pipe.execute()
         except Exception:  # pragma: no cover - covered by the smoke test
             # Redis hiccups must not break the request path. Fail open:
-            # log and let the caller through; the in-memory fallback in
-            # build_rate_limiter handles sustained outages.
+            # log, bump the error counter so the Prometheus alert picks
+            # up sustained outages, and let the caller through. The
+            # build_rate_limiter helper handles permanent outages by
+            # falling back to the in-memory limiter at construction.
             logger.exception("redis_rate_limit_failed")
+            rate_limit_redis_errors.labels(scope=self._scope).inc()
             return True
         return int(count) <= self.max_requests
 

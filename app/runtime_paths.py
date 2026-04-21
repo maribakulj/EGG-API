@@ -10,6 +10,7 @@ DEFAULT_HOME_DIR = Path(".")
 DEFAULT_CONFIG_RELATIVE = Path("config/egg.yaml")
 DEFAULT_STATE_DB_RELATIVE = Path("data/egg_state.sqlite3")
 DEFAULT_BOOTSTRAP_KEY_FILE = Path("data/bootstrap_admin.key")
+DEFAULT_CSRF_KEY_FILE = Path("data/csrf_signing.key")
 
 LEGACY_INSECURE_BOOTSTRAP_KEY = "admin-change-me"
 
@@ -47,6 +48,54 @@ def get_bootstrap_key_path() -> Path:
     if override:
         return Path(override).expanduser()
     return get_home_dir() / DEFAULT_BOOTSTRAP_KEY_FILE
+
+
+def get_csrf_key_path() -> Path:
+    override = os.getenv("EGG_CSRF_KEY_PATH")
+    if override:
+        return Path(override).expanduser()
+    return get_home_dir() / DEFAULT_CSRF_KEY_FILE
+
+
+def resolve_csrf_signing_key() -> bytes:
+    """Return the persistent CSRF signing key, creating it if absent.
+
+    The key lives in a 0600 sidecar under EGG_HOME so admin tokens
+    survive process restarts — otherwise every deploy invalidates the
+    CSRF tokens baked into every open admin tab, forcing a reload.
+
+    Operators can pin the value via ``EGG_CSRF_SIGNING_KEY`` (hex) or
+    relocate the sidecar via ``EGG_CSRF_KEY_PATH``. On a multi-node
+    deploy both nodes must share the same value; the env var is the
+    right affordance there.
+    """
+    env_value = os.getenv("EGG_CSRF_SIGNING_KEY", "").strip()
+    if env_value:
+        try:
+            return bytes.fromhex(env_value)
+        except ValueError as exc:
+            raise RuntimeError(
+                "EGG_CSRF_SIGNING_KEY is not valid hex (needs 64 hex chars for 32 bytes)."
+            ) from exc
+
+    sidecar = get_csrf_key_path()
+    try:
+        raw = sidecar.read_text().strip()
+    except OSError:
+        raw = ""
+    if raw:
+        try:
+            return bytes.fromhex(raw)
+        except ValueError:
+            # Corrupt sidecar — regenerate rather than crash at import.
+            raw = ""
+
+    generated = secrets.token_bytes(32)
+    sidecar.parent.mkdir(parents=True, exist_ok=True)
+    sidecar.write_text(generated.hex())
+    with contextlib.suppress(OSError):
+        sidecar.chmod(stat.S_IRUSR | stat.S_IWUSR)
+    return generated
 
 
 def _read_sidecar_key(path: Path) -> str | None:

@@ -197,22 +197,32 @@ def test_s7_2_app_state_exposes_container(client) -> None:
     assert fastapi_app.state.container is not None
 
 
-def test_s7_2_get_container_prefers_app_state() -> None:
+def test_s7_2_get_container_prefers_app_state(tmp_path, monkeypatch) -> None:
     from fastapi import FastAPI
 
     from app.dependencies import Container, container as module_singleton, get_container
 
-    # Fake Request pointing at a fresh FastAPI with its own container.
+    # Build a *real* Container on an isolated state DB. Pre-Sprint-10
+    # the test used ``Container.__new__(Container)`` which only
+    # exercised ``is`` identity against an uninitialized object — it
+    # would have passed even if get_container secretly returned the
+    # module singleton.
+    monkeypatch.setenv("EGG_STATE_DB_PATH", str(tmp_path / "alt-state.sqlite3"))
+    alt = Container()
     fresh = FastAPI()
-    sentinel = Container.__new__(Container)
-    fresh.state.container = sentinel
+    fresh.state.container = alt
 
     class _Req:
         app = fresh
 
     resolved = get_container(_Req())  # type: ignore[arg-type]
-    assert resolved is sentinel
+    assert resolved is alt
     assert resolved is not module_singleton
+    # Sanity: the alternate container is fully initialized (not just a
+    # sentinel), so a caller that reaches for one of its services gets
+    # a real implementation.
+    assert resolved.store is not module_singleton.store
+    assert resolved.adapter is not None
 
 
 def test_s7_2_get_container_falls_back_to_singleton() -> None:

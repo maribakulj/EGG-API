@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, Request, Response
@@ -164,7 +165,7 @@ def search(
             next_cursor=next_cursor,
         )
         jsonld_response = Response(
-            content=__import__("json").dumps(body_payload),
+            content=json.dumps(body_payload),
             media_type=JSONLD_MEDIA_TYPE,
         )
         for header in ("Cache-Control", "ETag"):
@@ -209,7 +210,7 @@ def get_record(
     if JSONLD_MEDIA_TYPE in request.headers.get("accept", ""):
         body_payload = record_to_jsonld(record)
         jsonld_response = Response(
-            content=__import__("json").dumps(body_payload),
+            content=json.dumps(body_payload),
             media_type=JSONLD_MEDIA_TYPE,
         )
         for header in ("Cache-Control", "ETag"):

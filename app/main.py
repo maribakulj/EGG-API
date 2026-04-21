@@ -26,6 +26,7 @@ from app.metrics import (
     render_latest,
     request_count,
     request_duration,
+    usage_persist_errors,
 )
 from app.public_api.routes import router as public_router
 from app.runtime_paths import is_production
@@ -34,24 +35,6 @@ from app.tracing import configure_tracing
 configure_logging()
 logger = structlog.get_logger("egg.http")
 
-# Hide the interactive explorers in production: they list every route
-# (including admin endpoints) and let anonymous callers fingerprint the
-# surface. The custom /v1/openapi.json stays on in every environment for
-# programmatic clients.
-# Shared metrics for the background purge task so operators can watch it
-# from the existing Prometheus scrape.
-# The value types intentionally track the schema of /admin/v1/storage/stats
-# consumers expect; mypy needs the explicit Any to accept the mixed payload
-# (numbers + nullable float timestamp).
-from typing import Any  # noqa: E402
-
-_last_purge_state: dict[str, Any] = {
-    "last_run_at": None,
-    "sessions_purged": 0,
-    "events_purged": 0,
-    "errors": 0,
-}
-
 
 async def _purge_loop() -> None:
     """Periodically evict expired admin sessions and stale usage events.
@@ -59,6 +42,12 @@ async def _purge_loop() -> None:
     Disabled when ``storage.purge_interval_seconds`` is non-positive. The
     task survives errors: it logs and keeps looping so a transient SQLite
     failure does not silently stop the retention clock.
+
+    Updates ``container.last_purge_state`` in-place so operators can read
+    the last tick via ``/admin/v1/storage/stats``. No lock is taken
+    because the dict is only written from this single background task
+    and read (snapshotted via ``dict()``) from request handlers; that
+    is safe under the GIL for the atomic ops we do here.
     """
     storage_cfg = container.config_manager.config.storage
     interval = int(storage_cfg.purge_interval_seconds)
@@ -76,7 +65,7 @@ async def _purge_loop() -> None:
             events = await run_in_threadpool(
                 container.store.purge_usage_events_older_than, retention_days
             )
-            _last_purge_state.update(
+            container.last_purge_state.update(
                 {
                     "last_run_at": time.time(),
                     "sessions_purged": int(sessions),
@@ -93,7 +82,8 @@ async def _purge_loop() -> None:
             logger.info("purge_loop_cancelled")
             raise
         except Exception:
-            _last_purge_state["errors"] = int(_last_purge_state.get("errors", 0)) + 1
+            state = container.last_purge_state
+            state["errors"] = int(state.get("errors", 0)) + 1
             logger.exception("purge_loop_tick_failed")
 
 
@@ -290,7 +280,10 @@ async def usage_audit_middleware(request: Request, call_next):
             )
         except Exception:
             # Storage failure must not hide the original response/exception.
+            # Bump the counter so a sustained SQLite outage trips an alert
+            # rather than rotting silently behind the `logger.exception`.
             logger.exception("usage_event_persist_failed", request_id=request_id)
+            usage_persist_errors.inc()
 
         structlog.contextvars.clear_contextvars()
 

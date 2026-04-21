@@ -88,10 +88,17 @@ def _m002_ui_sessions_expires_at(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_ui_sessions_expires ON ui_sessions(expires_at)")
 
 
-def _m003_ui_sessions_hash_tokens(conn: sqlite3.Connection) -> None:
-    # Sprint 1 S1.6: the `token` column now stores SHA-256(cookie), not raw.
-    # Legacy rows cannot be decrypted; wipe them so users re-authenticate.
-    # The migration itself is a no-op on fresh dbs (DELETE hits 0 rows).
+def _m003_ui_sessions_wipe_pre_hash(conn: sqlite3.Connection) -> None:
+    """One-shot wipe of pre-Sprint-1 sessions.
+
+    Sprint 1 S1.6 switched the ``token`` column to store SHA-256(cookie)
+    instead of the raw value. Legacy rows carry plaintext tokens that
+    the hashed lookup can never match, so this migration discards them
+    to force a clean re-authentication. The name is intentionally
+    "wipe" not "hash" — nothing is re-hashed here; new rows created
+    after this migration ran will already be hashed by the application
+    layer. No-op on fresh DBs (DELETE hits 0 rows).
+    """
     conn.execute("DELETE FROM ui_sessions")
 
 
@@ -118,7 +125,11 @@ def _m005_api_keys_hash_variant(conn: sqlite3.Connection) -> None:
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(1, "baseline", _m001_baseline),
     Migration(2, "ui_sessions_expires_at", _m002_ui_sessions_expires_at),
-    Migration(3, "ui_sessions_hash_tokens", _m003_ui_sessions_hash_tokens),
+    # Version 3 name was "ui_sessions_hash_tokens" pre-Sprint-10 but the
+    # function only wiped the table; the new name is honest. The version
+    # number and applied-at marker are unchanged, so existing databases
+    # still see it as "already applied".
+    Migration(3, "ui_sessions_wipe_pre_hash", _m003_ui_sessions_wipe_pre_hash),
     Migration(4, "retire_quota_counters", _m004_retire_quota_counters),
     Migration(5, "api_keys_hash_variant", _m005_api_keys_hash_variant),
 )
@@ -143,11 +154,17 @@ def _applied_versions(conn: sqlite3.Connection) -> set[int]:
 def _baseline_pre_existing_db(conn: sqlite3.Connection, applied: set[int]) -> set[int]:
     """On first upgrade, fast-forward the version pointer for legacy dbs.
 
-    Heuristics:
+    Only baselines *structural* migrations — those that create tables or
+    columns idempotently. Data migrations (e.g. the ui_sessions wipe in
+    version 3) are left to run, because we cannot safely heuristic-detect
+    whether they already happened: a 64-char raw token would look exactly
+    like a SHA-256 hash. Re-running migration 3 on an already-hashed DB
+    is a no-op (deletes rows that the user will simply re-login to
+    recreate), and re-running it on a plaintext DB is the correct action.
+
+    Heuristics (structural only):
       - If `api_keys` already exists, baseline 1 is effectively applied.
       - If `ui_sessions.expires_at` column exists, baseline 2 is applied.
-      - If `ui_sessions` has no raw tokens (only hashed SHA-256 = 64 chars),
-        assume 3 is applied.
       - If `quota_counters` does not exist, 4 is applied.
       - If `api_keys.hash_variant` column exists, 5 is applied.
     """
@@ -167,12 +184,6 @@ def _baseline_pre_existing_db(conn: sqlite3.Connection, applied: set[int]) -> se
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(ui_sessions)").fetchall()}
         if "expires_at" in cols:
             baselined.add(2)
-        # Heuristic: tokens are 64-char SHA-256 hex. Presence of any row not
-        # matching that shape means migration 3 hasn't run; otherwise mark it
-        # applied so we don't re-wipe the table.
-        rows = conn.execute("SELECT token FROM ui_sessions LIMIT 5").fetchall()
-        if all(len(str(r["token"])) == 64 for r in rows):
-            baselined.add(3)
     if not _has_table("quota_counters") and _has_table("api_keys"):
         baselined.add(4)
     if _has_table("api_keys"):

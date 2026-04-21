@@ -20,9 +20,34 @@ from app.rate_limit.limiter import InMemoryRateLimiter
 from app.storage.sqlite_store import SQLiteStore
 from tests._fakes import FakeAdapter
 
+# Env vars that a test may monkey-patch in isolation but that leak into
+# the next test's container rebuild if not wiped. Listed explicitly so
+# the autouse fixture has a complete teardown contract — adding a new
+# env-var knob means adding it here too.
+_LEAKY_ENV_VARS = (
+    "EGG_OTEL_ENDPOINT",
+    "OTEL_EXPORTER_OTLP_ENDPOINT",
+    "EGG_METRICS_TOKEN",
+    "EGG_RATE_LIMIT_REDIS_URL",
+    "EGG_API_KEY_PEPPER",
+    "EGG_CSRF_SIGNING_KEY",
+)
+
 
 @pytest.fixture(autouse=True)
-def reset_container(tmp_path) -> None:
+def reset_container(tmp_path, monkeypatch) -> None:
+    # Scrub optional-feature env vars so a test that set one does not
+    # contaminate the container rebuild performed by the next test.
+    for var in _LEAKY_ENV_VARS:
+        monkeypatch.delenv(var, raising=False)
+
+    # Reset the tracing singleton. Pre-Sprint-10 this was only possible
+    # via ``sys.modules.pop("app.tracing")``, which re-ran every module
+    # side-effect and leaked state to later tests in the same worker.
+    from app.tracing import reset_for_tests as reset_tracing
+
+    reset_tracing()
+
     container.adapter = FakeAdapter()
     container.rate_limiter = InMemoryRateLimiter()
     container.login_rate_limiter = InMemoryRateLimiter(max_requests=1000, window_seconds=60)
