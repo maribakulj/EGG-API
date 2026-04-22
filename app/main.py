@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from app import __version__
@@ -29,11 +30,16 @@ from app.metrics import (
     usage_persist_errors,
 )
 from app.public_api.routes import router as public_router
-from app.runtime_paths import is_production
+from app.runtime_paths import check_rate_limit_worker_safety, is_production
 from app.tracing import configure_tracing
 
 configure_logging()
 logger = structlog.get_logger("egg.http")
+
+# Multi-worker + in-memory rate limit is a silent security downgrade. Crash
+# on prod, warn in dev. Runs at import so uvicorn workers pick it up before
+# any request is served.
+check_rate_limit_worker_safety()
 
 
 async def _purge_loop() -> None:
@@ -116,10 +122,20 @@ app = FastAPI(
 # the request arrives from a configured trusted hop. Without this, every
 # client behind the reverse proxy shares the proxy's IP for rate-limiting
 # and audit logs.
-_trusted = container.config_manager.config.proxy.trusted_proxies
+_proxy_cfg = container.config_manager.config.proxy
+_trusted = _proxy_cfg.trusted_proxies
 if _trusted:
     trusted_hosts = "*" if _trusted == ["*"] else ",".join(_trusted)
     app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=trusted_hosts)
+
+# Reject requests whose ``Host`` header does not match the configured list.
+# Starlette compares case-insensitively and supports a single ``*`` suffix
+# wildcard (``*.example.org``). Empty list → middleware skipped (local dev
+# and tests run against 127.0.0.1/testserver where host validation would
+# only create friction).
+_allowed_hosts = [h for h in _proxy_cfg.allowed_hosts if h]
+if _allowed_hosts:
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=_allowed_hosts)
 
 # Expose the container on ``app.state`` so handlers/tests can take it via
 # ``Depends(get_container)`` (see app.dependencies.get_container) instead of

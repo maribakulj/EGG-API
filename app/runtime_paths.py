@@ -154,3 +154,58 @@ def get_bootstrap_admin_key(config_value: str) -> str:
     """Backwards-compatible wrapper returning only the key (legacy callers)."""
     key, _ = resolve_bootstrap_admin_key(config_value)
     return key
+
+
+# Env vars operators commonly use to declare a worker count.  We read all
+# three because different process managers pick different conventions:
+# gunicorn's ``$WEB_CONCURRENCY``, uvicorn/systemd's ``$UVICORN_WORKERS``,
+# and ``$EGG_WORKERS`` as an explicit EGG-specific override.
+_WORKER_ENV_VARS: tuple[str, ...] = ("EGG_WORKERS", "WEB_CONCURRENCY", "UVICORN_WORKERS")
+
+
+def declared_worker_count() -> int:
+    """Return the operator-declared worker count (best-effort; defaults to 1).
+
+    Only honored for env vars that parse cleanly as a positive integer.
+    A malformed value is treated as "unknown" rather than crashing boot.
+    """
+    for name in _WORKER_ENV_VARS:
+        raw = os.getenv(name, "").strip()
+        if not raw:
+            continue
+        try:
+            value = int(raw)
+        except ValueError:
+            continue
+        if value > 0:
+            return value
+    return 1
+
+
+def check_rate_limit_worker_safety() -> None:
+    """Refuse to boot with a multi-worker config but no shared rate limiter.
+
+    The in-memory limiter is per-process: with N workers an attacker
+    effectively gets N times the published quota, making the rate limit
+    advertised in the docs a lie.  Require an explicit
+    ``EGG_RATE_LIMIT_REDIS_URL`` in production, warn in development.
+    """
+    workers = declared_worker_count()
+    if workers <= 1:
+        return
+    if os.getenv("EGG_RATE_LIMIT_REDIS_URL", "").strip():
+        return
+    message = (
+        f"EGG-API was started with {workers} workers but no "
+        "EGG_RATE_LIMIT_REDIS_URL is configured. The in-memory rate limiter "
+        "is per-process, so every worker has its own counter — the effective "
+        "public limit is silently multiplied by the worker count. "
+        "Either set EGG_RATE_LIMIT_REDIS_URL to a reachable Redis, or run "
+        "with a single worker."
+    )
+    if is_production():
+        raise RuntimeError(message)
+    # Dev: loud warning on stderr, but don't block the CLI loop.
+    import sys
+
+    sys.stderr.write(f"[EGG-API] WARNING: {message}\n")

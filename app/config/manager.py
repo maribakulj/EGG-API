@@ -39,7 +39,14 @@ class ConfigManager:
 
     # Config keys that must never be serialized to the YAML file. Secrets should be
     # provided via environment variable or a 0600 sidecar file instead.
-    _REDACTED_KEYS: tuple[tuple[str, ...], ...] = (("auth", "bootstrap_admin_key"),)
+    _REDACTED_KEYS: tuple[tuple[str, ...], ...] = (
+        ("auth", "bootstrap_admin_key"),
+        # Backend credentials: inline values are accepted in memory (e.g.
+        # during a config round-trip) but never hit disk. Operators pin
+        # them via ``backend.auth.password_env`` / ``token_env``.
+        ("backend", "auth", "password"),
+        ("backend", "auth", "token"),
+    )
 
     @classmethod
     def _redact(cls, data: dict[str, object]) -> dict[str, object]:

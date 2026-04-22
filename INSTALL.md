@@ -87,10 +87,50 @@ proxy:
   trusted_proxies:
     - 127.0.0.1
     - 10.0.0.0/8
+  allowed_hosts:
+    - egg.example.org
 ```
 
-Use `["*"]` only when the app is guaranteed unreachable except through the
-proxy.
+- `trusted_proxies` gates the `X-Forwarded-*` rewrite. Use `["*"]`
+  only when the app is guaranteed unreachable except through the proxy.
+- `allowed_hosts` is applied by `TrustedHostMiddleware`: any request
+  whose `Host` header does not match is rejected with `400` before the
+  handler runs. Leave empty for local dev; pin it in production to the
+  names the service is actually advertised under (wildcards supported,
+  e.g. `*.example.org`).
+
+### Backend authentication
+
+Elasticsearch 8+ ships with security enabled by default. Configure the
+adapter's credentials under `backend.auth` — never in `backend.url`:
+
+```yaml
+backend:
+  url: https://elasticsearch.internal:9200
+  auth:
+    mode: basic          # none | basic | bearer | api_key
+    username: egg_ro
+    password_env: EGG_BACKEND_PASSWORD   # secret read from env at boot
+```
+
+Inline `password` / `token` values are accepted in-memory (so a
+round-trip through `PUT /admin/v1/config` works) but are stripped by
+`ConfigManager.save()` so the on-disk YAML never contains the secret.
+The `*_env` indirection is the recommended form.
+
+### Multi-worker deployments
+
+The default rate limiter is **per-process**. Running with more than one
+worker without a shared backend silently multiplies the published
+public rate limit by the worker count. EGG-API therefore:
+
+- refuses to start in production (`EGG_ENV=production`) when
+  `EGG_WORKERS` / `WEB_CONCURRENCY` / `UVICORN_WORKERS > 1` and
+  `EGG_RATE_LIMIT_REDIS_URL` is unset;
+- prints a loud warning in development in the same situation.
+
+Set `EGG_RATE_LIMIT_REDIS_URL=redis://...` to share state across
+workers, or keep the default single-worker run.
 
 ### Example: nginx
 

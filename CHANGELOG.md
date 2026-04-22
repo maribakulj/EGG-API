@@ -5,6 +5,36 @@ All notable changes to EGG-API are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Sprint 12 — deployment hardening**:
+  - `backend.auth` config block supports `none` / `basic` / `bearer` /
+    `api_key` and is threaded through the ES + OpenSearch adapters.
+    Inline `password` / `token` are redacted by `ConfigManager.save()`;
+    operators should use the `password_env` / `token_env` indirection
+    to keep secrets off disk.
+  - `proxy.allowed_hosts` → Starlette `TrustedHostMiddleware` rejects
+    requests with an unexpected `Host` header before any handler runs.
+  - Multi-worker guardrail: refuse to boot in production (and warn in
+    development) when `EGG_WORKERS` / `WEB_CONCURRENCY` /
+    `UVICORN_WORKERS > 1` without `EGG_RATE_LIMIT_REDIS_URL`. Prevents
+    a silent N× rate-limit inflation with the in-memory limiter.
+  - `extra="forbid"` on every `AppConfig` sub-model: typos in
+    `config/egg.yaml` now fail `egg-api check-config` instead of being
+    silently ignored.
+
+### Changed
+
+- **Sprint 11 — honesty pass**: README and SPECS aligned with the
+  v1.0.0 reality. `/v1/suggest` is live, `/v1/manifest/{id}` retired,
+  Solr marked deferred, the desktop story reframed as a 3-step roadmap
+  instead of an aspirational promise. Added `SECURITY.md`,
+  `CONTRIBUTING.md`, `.github/dependabot.yml`. Split `make dev`
+  (auto-reload) from `make run` (production-style). `ConfigManager`
+  now chmods `config/egg.yaml` to 0600 on POSIX.
+
 ## [1.0.0] — 2026-04-21
 
 First stable release after a full audit-driven sprint series (S0 → S8).
