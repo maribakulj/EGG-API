@@ -393,10 +393,13 @@ Same-origin console at `/admin/*`, served by Jinja2 templates (autoescape enforc
 
 - `/admin/login` — bootstrap form (rate-limited).
 - `/admin/ui` — dashboard (service + backend health, usage summary).
-- `/admin/ui/setup` — **setup wizard** (Sprint 14, screens 1-3): a
-  guided flow that connects a backend, picks an index and proposes a
-  mapping without any YAML editing. Drafts are stored per admin in the
-  state DB; Sprint 15 will add the final publish step.
+- `/admin/ui/setup` — **setup wizard** (8 steps, SPECS §26): a guided
+  flow covering backend → source → mapping → security → exposure →
+  first public key → live test → review & publish. Nothing reaches
+  `config/egg.yaml` until the operator clicks *Publish*; drafts are
+  per-admin and survive disconnects.
+- `/admin/ui/help` — glossary of the technical terms used across the
+  console, written for non-technical operators.
 - `/admin/ui/config` — editable configuration form.
 - `/admin/ui/mapping` — mapping and allowlists overview.
 - `/admin/ui/keys` — create / suspend / revoke API keys.

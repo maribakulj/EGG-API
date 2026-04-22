@@ -321,10 +321,14 @@ def test_mapping_accepts_valid_submission(client: TestClient, admin_ui_session: 
             "mode__creators": "direct",
             "action": "next",
         },
+        follow_redirects=False,
     )
-    assert resp.status_code == 200
-    assert "Mapping saved" in resp.text
-    payload, _ = container.store.load_setup_draft("admin")  # type: ignore[misc]
+    # Sprint 15 routes a successful mapping submission onward to the
+    # security screen rather than re-rendering the page.
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "/admin/ui/setup/security"
+    payload, step = container.store.load_setup_draft("admin")  # type: ignore[misc]
+    assert step == "security"
     assert payload["mapping"]["id"]["source"] == "id"
     assert payload["mapping"]["type"]["source"] == "type"
     assert payload["mapping"]["title"]["source"] == "title"

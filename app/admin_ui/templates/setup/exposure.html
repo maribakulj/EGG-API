@@ -1,0 +1,52 @@
+{% extends "setup/_layout.html" %}
+{% block wizard %}
+<div class="panel">
+  <h3>Step 5 — Exposure</h3>
+  <p class="help">
+    Choose which facets, sorts and record fields your public API lets
+    callers use. Everything you uncheck is refused with a clear error
+    if a caller requests it. Safer defaults are pre-selected — expand
+    only what you are sure about.
+  </p>
+
+  <form class="stack" method="post" action="/admin/ui/setup/exposure">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+
+    <fieldset>
+      <legend>Allowed facets <small>(filter breakdowns)</small></legend>
+      {% for name in catalog.allowed_facets %}
+      <label>
+        <input type="checkbox" name="allowed_facets" value="{{ name }}"
+          {% if name in draft.exposure.allowed_facets %}checked{% endif %} /> {{ name }}
+      </label>
+      {% endfor %}
+    </fieldset>
+
+    <fieldset>
+      <legend>Allowed sorts</legend>
+      {% for name in catalog.allowed_sorts %}
+      <label>
+        <input type="checkbox" name="allowed_sorts" value="{{ name }}"
+          {% if name in draft.exposure.allowed_sorts %}checked{% endif %} /> {{ name }}
+      </label>
+      {% endfor %}
+    </fieldset>
+
+    <fieldset>
+      <legend>Public record fields</legend>
+      {% for name in catalog.allowed_include_fields %}
+      <label>
+        <input type="checkbox" name="allowed_include_fields" value="{{ name }}"
+          {% if name in draft.exposure.allowed_include_fields %}checked{% endif %} /> {{ name }}
+      </label>
+      {% endfor %}
+      <p class="help">Only fields you mapped in step 3 can be exposed here.</p>
+    </fieldset>
+
+    <div class="actions">
+      <button type="submit" name="action" value="next">Save &amp; next</button>
+      <a href="/admin/ui/setup/security"><button type="button" class="secondary">Back</button></a>
+    </div>
+  </form>
+</div>
+{% endblock %}

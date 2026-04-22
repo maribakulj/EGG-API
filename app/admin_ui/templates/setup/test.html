@@ -1,0 +1,47 @@
+{% extends "setup/_layout.html" %}
+{% block wizard %}
+<div class="panel">
+  <h3>Step 7 — Live test</h3>
+  <p class="help">
+    Run a minimal search against the backend you configured. This does
+    not change anything — it just confirms the connection works, the
+    index exists, and the mapping can produce a record shape.
+  </p>
+
+  <form class="stack" method="post" action="/admin/ui/setup/test">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <label>
+      Query (optional)
+      <input name="q" value="{{ draft.test_result.query if draft.test_result else '' }}" placeholder="leave blank to match all" />
+      <p class="help">Typing a keyword is the quickest way to see a real record come back.</p>
+    </label>
+    <div class="actions">
+      <button type="submit" name="action" value="run">Run the test</button>
+      <button type="submit" name="action" value="next">Save &amp; next</button>
+      <a href="/admin/ui/setup/keys"><button type="button" class="secondary">Back</button></a>
+    </div>
+  </form>
+</div>
+
+{% if draft.test_result %}
+<div class="panel">
+  <h4>Result</h4>
+  <p>Total hits: <code class="muted">{{ draft.test_result.total }}</code></p>
+  {% if draft.test_result.samples %}
+  <table>
+    <thead><tr><th>ID</th><th>Title</th></tr></thead>
+    <tbody>
+    {% for s in draft.test_result.samples %}
+    <tr>
+      <td>{{ s.id or '—' }}</td>
+      <td>{{ s.title or '—' }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="help">No hits — that's fine if the index is empty. Otherwise try a different query.</p>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,30 @@
+{% extends "setup/_layout.html" %}
+{% block wizard %}
+<div class="panel">
+  <h3>Step 8 — Review &amp; publish</h3>
+  <p class="help">
+    Look over the summary below. Clicking <strong>Publish</strong>
+    swaps the service onto this configuration: existing callers keep
+    working, but the backend URL, mapping, security profile and
+    exposure allowlists become effective immediately.
+  </p>
+
+  <table>
+    <tr><th>Backend</th><td>{{ draft.backend.type }} at <code class="muted">{{ draft.backend.url }}</code></td></tr>
+    <tr><th>Index</th><td><code class="muted">{{ draft.source.index }}</code></td></tr>
+    <tr><th>Auth to backend</th><td>{{ draft.backend.auth.mode }}</td></tr>
+    <tr><th>Security profile</th><td>{{ draft.security_profile }} ({{ draft.public_mode }})</td></tr>
+    <tr><th>Allowed facets</th><td>{{ draft.exposure.allowed_facets | join(', ') or '—' }}</td></tr>
+    <tr><th>Allowed sorts</th><td>{{ draft.exposure.allowed_sorts | join(', ') or '—' }}</td></tr>
+    <tr><th>Allowed include fields</th><td>{{ draft.exposure.allowed_include_fields | join(', ') or '—' }}</td></tr>
+    <tr><th>Mapped public fields</th><td>{{ draft.mapping.keys() | list | join(', ') or '—' }}</td></tr>
+    {% if draft.first_key %}<tr><th>First public key</th><td>{{ draft.first_key.key_id }}</td></tr>{% endif %}
+  </table>
+
+  <form class="inline-form" method="post" action="/admin/ui/setup/publish">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <button type="submit">Publish this configuration</button>
+    <a href="/admin/ui/setup/test"><button type="button" class="secondary">Back</button></a>
+  </form>
+</div>
+{% endblock %}

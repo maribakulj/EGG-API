@@ -27,12 +27,15 @@ from app.admin_ui.auth import (
     verify_csrf,
 )
 from app.admin_ui.setup_service import (
+    EXPOSURE_CATALOG,
     WIZARD_STEPS,
     SetupDraft,
     SetupDraftService,
     build_probe_adapter,
+    draft_to_config,
     extract_index_choices,
     propose_mapping,
+    run_probe_search,
 )
 from app.auth.key_service import ApiKeyService
 from app.config.models import AppConfig
@@ -823,14 +826,325 @@ async def setup_mapping_submit(request: Request):
         )
 
     draft.mapping = new_mapping
-    svc.save(key_id, draft, "mapping")
+    svc.save(key_id, draft, "security")
+    return RedirectResponse("/admin/ui/setup/security", status_code=303)
+
+
+# -- Step 4: security ----------------------------------------------------
+
+
+_ALLOWED_SECURITY_PROFILES: frozenset[str] = frozenset({"prudent", "standard"})
+_ALLOWED_PUBLIC_MODES: frozenset[str] = frozenset(
+    {"anonymous_allowed", "api_key_optional", "api_key_required"}
+)
+
+
+@router.get("/ui/setup/security", response_class=HTMLResponse)
+def setup_security_page(request: Request):
+    key_id, redirect = _require_login_key_id(request)
+    if redirect is not None:
+        return redirect
+    draft, _ = _setup_service().load(key_id)
+    if not draft.mapping:
+        return RedirectResponse("/admin/ui/setup/mapping", status_code=303)
+    return _render_wizard(request, "setup/security.html", draft=draft, current_step="security")
+
+
+@router.post("/ui/setup/security", response_class=HTMLResponse)
+async def setup_security_submit(request: Request):
+    key_id, redirect = _require_login_key_id(request)
+    if redirect is not None:
+        return redirect
+    csrf_error = await _enforce_csrf(request)
+    if csrf_error is not None:
+        return csrf_error
+
+    data = await _form(request)
+    svc = _setup_service()
+    draft, _ = svc.load(key_id)
+    profile = (data.get("security_profile") or "").strip()
+    public_mode = (data.get("public_mode") or "").strip()
+    if profile not in _ALLOWED_SECURITY_PROFILES or public_mode not in _ALLOWED_PUBLIC_MODES:
+        return _render_wizard(
+            request,
+            "setup/security.html",
+            draft=draft,
+            current_step="security",
+            error="Pick one security profile and one public-access mode before continuing.",
+            status_code=400,
+        )
+    draft.security_profile = profile
+    draft.public_mode = public_mode
+    svc.save(key_id, draft, "exposure")
+    return RedirectResponse("/admin/ui/setup/exposure", status_code=303)
+
+
+# -- Step 5: exposure ----------------------------------------------------
+
+
+@router.get("/ui/setup/exposure", response_class=HTMLResponse)
+def setup_exposure_page(request: Request):
+    key_id, redirect = _require_login_key_id(request)
+    if redirect is not None:
+        return redirect
+    draft, _ = _setup_service().load(key_id)
+    if not draft.security_profile:
+        return RedirectResponse("/admin/ui/setup/security", status_code=303)
     return _render_wizard(
         request,
-        "setup/mapping.html",
+        "setup/exposure.html",
         draft=draft,
-        current_step="mapping",
-        message=(
-            "Mapping saved. Screens 4-7 (security profile, exposure, keys, "
-            "test) arrive in Sprint 15."
-        ),
+        current_step="exposure",
+        catalog=EXPOSURE_CATALOG,
     )
+
+
+@router.post("/ui/setup/exposure", response_class=HTMLResponse)
+async def setup_exposure_submit(request: Request):
+    key_id, redirect = _require_login_key_id(request)
+    if redirect is not None:
+        return redirect
+    csrf_error = await _enforce_csrf(request)
+    if csrf_error is not None:
+        return csrf_error
+
+    # The exposure form ships checkboxes, so ``_form`` (which collapses
+    # to first-value) would drop repeat entries. Re-parse the body
+    # keeping every value.
+    raw = (await request.body()).decode("utf-8", errors="replace")
+    parsed = parse_qs(raw, keep_blank_values=True)
+
+    svc = _setup_service()
+    draft, _ = svc.load(key_id)
+    for field_name, allowed in EXPOSURE_CATALOG.items():
+        submitted = parsed.get(field_name, [])
+        # Constrain the operator's choice to the catalog we offered.
+        draft.exposure[field_name] = [v for v in submitted if v in allowed]
+
+    # At least ``id`` and ``type`` have to stay in allowed_include_fields,
+    # otherwise the public API cannot return a usable record shape.
+    include = draft.exposure.get("allowed_include_fields") or []
+    for mandatory in ("id", "type"):
+        if mandatory not in include:
+            include = [*include, mandatory]
+    draft.exposure["allowed_include_fields"] = include
+
+    svc.save(key_id, draft, "keys")
+    return RedirectResponse("/admin/ui/setup/keys", status_code=303)
+
+
+# -- Step 6: first public key -------------------------------------------
+
+
+@router.get("/ui/setup/keys", response_class=HTMLResponse)
+def setup_keys_page(request: Request):
+    key_id, redirect = _require_login_key_id(request)
+    if redirect is not None:
+        return redirect
+    draft, _ = _setup_service().load(key_id)
+    if not draft.security_profile:
+        return RedirectResponse("/admin/ui/setup/security", status_code=303)
+    return _render_wizard(request, "setup/keys.html", draft=draft, current_step="keys")
+
+
+@router.post("/ui/setup/keys", response_class=HTMLResponse)
+async def setup_keys_submit(request: Request):
+    key_id, redirect = _require_login_key_id(request)
+    if redirect is not None:
+        return redirect
+    csrf_error = await _enforce_csrf(request)
+    if csrf_error is not None:
+        return csrf_error
+
+    data = await _form(request)
+    svc = _setup_service()
+    draft, _ = svc.load(key_id)
+    action = data.get("action", "create")
+
+    if action == "skip" or (action == "next" and draft.first_key is not None):
+        svc.save(key_id, draft, "test")
+        return RedirectResponse("/admin/ui/setup/test", status_code=303)
+
+    if action == "create":
+        label = (data.get("key_id") or "").strip()
+        try:
+            created = _key_service().create(label)
+        except AppError as exc:
+            return _render_wizard(
+                request,
+                "setup/keys.html",
+                draft=draft,
+                current_step="keys",
+                error=exc.message,
+                status_code=exc.status_code,
+            )
+        # Store the label + created_at + prefix so the published screen
+        # can reference them; the raw secret is shown on this request
+        # only, then wiped so the draft can never replay it.
+        draft.first_key = {
+            "key_id": created.key_id,
+            "key": created.key,
+            "created_at": created.created_at,
+            "prefix": created.key[:8],
+        }
+        svc.save(key_id, draft, "keys")
+        return _render_wizard(
+            request,
+            "setup/keys.html",
+            draft=draft,
+            current_step="keys",
+            message="Key created. Copy the secret now — it will not be shown again.",
+        )
+
+    # Fallback: unknown action → just re-render the page.
+    return _render_wizard(request, "setup/keys.html", draft=draft, current_step="keys")
+
+
+# -- Step 7: live test ---------------------------------------------------
+
+
+@router.get("/ui/setup/test", response_class=HTMLResponse)
+def setup_test_page(request: Request):
+    key_id, redirect = _require_login_key_id(request)
+    if redirect is not None:
+        return redirect
+    draft, _ = _setup_service().load(key_id)
+    if not draft.security_profile:
+        return RedirectResponse("/admin/ui/setup/security", status_code=303)
+    return _render_wizard(request, "setup/test.html", draft=draft, current_step="test")
+
+
+@router.post("/ui/setup/test", response_class=HTMLResponse)
+async def setup_test_submit(request: Request):
+    key_id, redirect = _require_login_key_id(request)
+    if redirect is not None:
+        return redirect
+    csrf_error = await _enforce_csrf(request)
+    if csrf_error is not None:
+        return csrf_error
+
+    data = await _form(request)
+    svc = _setup_service()
+    draft, _ = svc.load(key_id)
+    action = data.get("action", "next")
+
+    if action == "run":
+        query = (data.get("q") or "").strip()
+        try:
+            adapter = build_probe_adapter(draft)
+            result = run_probe_search(adapter, query)
+        except AppError as exc:
+            return _render_wizard(
+                request,
+                "setup/test.html",
+                draft=draft,
+                current_step="test",
+                error=f"Test failed: {exc.message}",
+                status_code=exc.status_code,
+            )
+        except Exception:
+            logger.exception("setup_test_failed", key_id=key_id)
+            return _render_wizard(
+                request,
+                "setup/test.html",
+                draft=draft,
+                current_step="test",
+                error=(
+                    "Unexpected error while running the test. Re-check the "
+                    "backend URL and credentials on step 1."
+                ),
+                status_code=400,
+            )
+        draft.test_result = result
+        svc.save(key_id, draft, "test")
+        return _render_wizard(
+            request,
+            "setup/test.html",
+            draft=draft,
+            current_step="test",
+            message="Test completed.",
+        )
+
+    svc.save(key_id, draft, "done")
+    return RedirectResponse("/admin/ui/setup/done", status_code=303)
+
+
+# -- Step 8: review & publish -------------------------------------------
+
+
+@router.get("/ui/setup/done", response_class=HTMLResponse)
+def setup_done_page(request: Request):
+    key_id, redirect = _require_login_key_id(request)
+    if redirect is not None:
+        return redirect
+    draft, _ = _setup_service().load(key_id)
+    if not draft.security_profile:
+        return RedirectResponse("/admin/ui/setup/security", status_code=303)
+    return _render_wizard(request, "setup/done.html", draft=draft, current_step="done")
+
+
+@router.post("/ui/setup/publish", response_class=HTMLResponse)
+async def setup_publish(request: Request):
+    key_id, redirect = _require_login_key_id(request)
+    if redirect is not None:
+        return redirect
+    csrf_error = await _enforce_csrf(request)
+    if csrf_error is not None:
+        return csrf_error
+
+    svc = _setup_service()
+    draft, _ = svc.load(key_id)
+    try:
+        new_config = draft_to_config(draft, preserve=container.config_manager.config)
+    except Exception as exc:
+        logger.exception("setup_publish_build_config_failed", key_id=key_id)
+        return _render_wizard(
+            request,
+            "setup/done.html",
+            draft=draft,
+            current_step="done",
+            error=f"Could not assemble a valid configuration: {exc}",
+            status_code=400,
+        )
+
+    try:
+        container.reload(new_config)
+    except Exception as exc:
+        logger.exception("setup_publish_reload_failed", key_id=key_id)
+        return _render_wizard(
+            request,
+            "setup/done.html",
+            draft=draft,
+            current_step="done",
+            error=f"Configuration saved but the service failed to swap to it: {exc}",
+            status_code=500,
+        )
+
+    # Keep the key_id + prefix for the published page; the raw secret
+    # was already shown on the keys step and is wiped here so the
+    # draft never persists a replayable credential.
+    shared_key = draft.first_key
+    if draft.first_key and draft.first_key.get("key"):
+        draft.first_key = {
+            "key_id": draft.first_key["key_id"],
+            "prefix": draft.first_key.get("prefix"),
+            "created_at": draft.first_key.get("created_at"),
+        }
+    svc.reset(key_id)
+    return _render(
+        "setup/published.html",
+        request,
+        shared_key=shared_key,
+    )
+
+
+# -- Help / glossary ----------------------------------------------------
+
+
+@router.get("/ui/help", response_class=HTMLResponse)
+def help_glossary(request: Request):
+    """Plain-language glossary for the terms the wizard uses."""
+    guard = _require_login(request)
+    if guard is not None:
+        return guard
+    return _render("help.html", request)
