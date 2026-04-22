@@ -16,6 +16,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from app import __version__
+from app.admin_api.keys import router as admin_keys_router
 from app.admin_api.routes import router as admin_router
 from app.admin_ui.routes import router as admin_ui_router
 from app.dependencies import container
@@ -150,6 +151,9 @@ configure_tracing(app)
 
 app.include_router(public_router)
 app.include_router(admin_router)
+# /admin/v1/keys lives in its own module (Sprint 13) to keep the CRUD
+# surface isolated from the setup/config routes.
+app.include_router(admin_keys_router)
 app.include_router(admin_ui_router)
 app.mount(
     "/admin-static",

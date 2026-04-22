@@ -363,11 +363,26 @@ All admin routes require `x-api-key: <admin-key>`.
 | `POST /admin/v1/test-query` | Translate a query to backend DSL without running it |
 | `GET  /admin/v1/usage?limit=&offset=` | Paginated usage events |
 | `GET  /admin/v1/status` | Backend + mapping health aggregate |
+| `GET  /admin/v1/keys` | List every API key (never returns the raw secret) |
+| `POST /admin/v1/keys` | Create a key. Returns the raw secret **once** |
+| `GET  /admin/v1/keys/{key_id}` | Fetch a single key's public record |
+| `PATCH /admin/v1/keys/{key_id}` | `{"action": "activate\|suspend\|revoke\|rotate"}` |
+| `DELETE /admin/v1/keys/{key_id}` | Soft-delete: revoke + invalidate sessions |
 
 ### Example
 
 ```bash
 curl -s -H "x-api-key: $ADMIN_KEY" http://127.0.0.1:8000/admin/v1/status | jq
+
+# Create a partner key and capture the one-time secret.
+curl -s -X POST -H "x-api-key: $ADMIN_KEY" -H 'content-type: application/json' \
+     -d '{"key_id": "partner_a"}' \
+     http://127.0.0.1:8000/admin/v1/keys | jq
+
+# Rotate it later; the new secret is returned in the response body.
+curl -s -X PATCH -H "x-api-key: $ADMIN_KEY" -H 'content-type: application/json' \
+     -d '{"action": "rotate"}' \
+     http://127.0.0.1:8000/admin/v1/keys/partner_a | jq
 ```
 
 ---

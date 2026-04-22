@@ -8,7 +8,7 @@ by default. Do not build HTML via f-strings in this module.
 
 from __future__ import annotations
 
-import re
+import contextlib
 from pathlib import Path
 from urllib.parse import parse_qs
 
@@ -26,6 +26,7 @@ from app.admin_ui.auth import (
     get_ui_key_id,
     verify_csrf,
 )
+from app.auth.key_service import ApiKeyService
 from app.config.models import AppConfig
 from app.dependencies import container
 from app.errors import AppError
@@ -41,7 +42,10 @@ templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 # it accidentally.
 templates.env.autoescape = True
 
-_KEY_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_.-]{1,64}$")
+
+def _key_service() -> ApiKeyService:
+    # Resolve per request so Container.reload() hot-swaps take effect.
+    return ApiKeyService(container.api_keys, container.store)
 
 
 async def _form(request: Request) -> dict[str, str]:
@@ -334,7 +338,7 @@ def _render_keys(
         "keys.html",
         request,
         status_code=status_code,
-        keys=container.api_keys.list_keys(),
+        keys=_key_service().list_keys(),
         message=message,
         error=error,
         new_key=new_key,
@@ -353,18 +357,10 @@ async def create_key(request: Request):
 
     data = await _form(request)
     key_id_input = data.get("key_id", "").strip()
-    if not _KEY_ID_PATTERN.match(key_id_input):
-        return _render_keys(
-            request,
-            error=(
-                "Key label must be 1-64 characters and contain only letters, "
-                "digits, '.', '_' or '-'."
-            ),
-            status_code=400,
-        )
-
     try:
-        created = container.api_keys.create(key_id_input)
+        created = _key_service().create(key_id_input)
+    except AppError as exc:
+        return _render_keys(request, error=exc.message, status_code=exc.status_code)
     except Exception:
         logger.exception("admin_create_key_failed", key_id=key_id_input)
         return _render_keys(
@@ -393,22 +389,19 @@ async def rotate_key(request: Request, key_id: str):
     csrf_error = await _enforce_csrf(request)
     if csrf_error is not None:
         return csrf_error
-    if not _KEY_ID_PATTERN.match(key_id):
-        return _render_keys(request, error="Invalid key label.", status_code=400)
 
-    new_secret = container.api_keys.rotate(key_id)
-    if new_secret is None:
-        return _render_keys(request, error=f"Unknown key label: {key_id}", status_code=404)
-    container.store.invalidate_sessions_for_key_id(key_id)
+    try:
+        rotated = _key_service().rotate(key_id)
+    except AppError as exc:
+        return _render_keys(request, error=exc.message, status_code=exc.status_code)
 
-    # Reuse the `new_key` slot to render the secret panel once.
-    rotated = {"key_id": key_id, "key": new_secret}
     response = _render_keys(
         request,
         message=(
             f"Key '{key_id}' rotated. Copy the new secret now — it will not be "
             "shown again. Active sessions for this key have been revoked."
         ),
+        # Template reads .key_id / .key; the dataclass exposes both.
         new_key=rotated,
     )
     # When rotating the key we used to sign in, kick ourselves out too.
@@ -426,16 +419,12 @@ async def key_status_action(request: Request, key_id: str):
     csrf_error = await _enforce_csrf(request)
     if csrf_error is not None:
         return csrf_error
-    if not _KEY_ID_PATTERN.match(key_id):
-        return RedirectResponse("/admin/ui/keys", status_code=303)
     data = await _form(request)
     action = data.get("action", "")
-    if action == "revoke":
-        container.api_keys.revoke_by_key_id(key_id)
-    elif action == "suspend":
-        container.api_keys.suspend_by_key_id(key_id)
-    elif action == "activate":
-        container.api_keys.activate_by_key_id(key_id)
+    # Legacy UI behaviour: ignore malformed/unknown inputs and bounce
+    # back to the list page. The REST API surfaces a typed error.
+    with contextlib.suppress(AppError):
+        _key_service().set_status(key_id, action)
     return RedirectResponse("/admin/ui/keys", status_code=303)
 
 

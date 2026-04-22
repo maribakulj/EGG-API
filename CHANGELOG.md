@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Sprint 13 — REST CRUD for API keys** (SPECS §13.7-13.10):
+  `GET/POST/PATCH/DELETE /admin/v1/keys` + `GET/PATCH/DELETE
+  /admin/v1/keys/{key_id}`. The raw secret is disclosed exactly once
+  (on create and on rotate) and never included in list/get responses.
+  Admin UI and REST API now share a single `ApiKeyService`, so label
+  validation, duplicate detection and session invalidation live in one
+  place. `DELETE` is a soft-revoke to preserve the `usage_events`
+  audit trail.
 - **Sprint 12 — deployment hardening**:
   - `backend.auth` config block supports `none` / `basic` / `bearer` /
     `api_key` and is threaded through the ES + OpenSearch adapters.
