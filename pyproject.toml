@@ -225,4 +225,10 @@ system_requires = [
 ]
 
 [tool.briefcase.app.egg-api.windows]
+# Windowed build: no attached cmd console flashes behind the
+# pywebview window at launch. app/desktop.py redirects stdout /
+# stderr to ``%APPDATA%\EGG-API\logs\launcher.log`` to replace the
+# lost terminal output. Set EGG_DESKTOP_CONSOLE=1 to reattach stdio
+# for development.
+console_app = false
 requires = []

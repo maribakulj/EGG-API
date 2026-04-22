@@ -64,10 +64,28 @@ directory:
 - Linux: `$XDG_DATA_HOME/egg-api` (or `~/.local/share/egg-api`)
 
 Binary installers (`.msi`, `.pkg`, AppImage) are produced by the
-`desktop-package.yml` GitHub Actions workflow on every release tag.
-**The artefacts are currently unsigned**; macOS and Windows will
-warn the first time they are opened. Code signing is scheduled for
-Sprint 19.
+`release.yml` GitHub Actions workflow on every release tag.
+**The artefacts are intentionally unsigned** (keeps the project
+free, no $99/year Apple fee, no $400+/year Authenticode EV cert).
+Windows SmartScreen and macOS Gatekeeper will warn at first launch;
+see [docs/first-launch.md](./docs/first-launch.md) for the 2-click
+bypass procedure.
+
+The launcher redirects its output to a log file under `EGG_HOME`
+because the Windows build is windowed (no attached cmd console).
+Logs land at:
+
+- Windows: `%APPDATA%\EGG-API\logs\launcher.log`
+- macOS: `~/Library/Application Support/EGG-API/logs/launcher.log`
+- Linux: `$XDG_DATA_HOME/egg-api/logs/launcher.log`
+
+Set `EGG_DESKTOP_CONSOLE=1` to keep stdout/stderr attached to the
+terminal when running the launcher from a shell.
+
+If the embedded `pywebview` window fails to open (missing WebView2
+on Windows 10 < 1803, missing WebKitGTK on a minimal Linux) the
+launcher falls back to a native message box with the URL to paste
+into any browser — the server itself is unaffected.
 
 ## Admin access
 

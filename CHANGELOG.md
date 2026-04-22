@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Sprint 21 — Windows/Mac polish without signing**:
+  - `app/desktop.py` now redirects stdout, stderr and the Python
+    logging tree to `EGG_HOME/logs/launcher.log` at the very top
+    of `main()`. Keeps the magic URL readable even in a windowed
+    (non-console) Briefcase build. `EGG_DESKTOP_CONSOLE=1` disables
+    the redirect for local dev.
+  - New `show_native_dialog()` helper: Windows uses `user32.MessageBoxW`
+    via `ctypes`, macOS uses `osascript`, Linux falls back to
+    `tkinter.messagebox`. Called when pywebview fails to import or
+    start (missing WebView2 runtime on old Windows 10, missing
+    WebKitGTK on headless Linux) so the operator still sees the
+    magic URL in a real dialog instead of a silent crash.
+  - `pyproject.toml` sets `console_app = false` on the Windows
+    Briefcase target — no more cmd window flashing behind the
+    pywebview window.
+  - New `docs/first-launch.md` explains the SmartScreen / Gatekeeper
+    bypass procedure, the WebView2 runtime requirement, and the
+    launcher log file locations per OS. INSTALL.md and the landing
+    page link to it and own the "unsigned by choice" framing.
+
+### Added
+
 - **Backend auto-discovery in the setup wizard**: step 1 now has a
   *Detect a backend on this machine* button. It probes a short
   allowlist of well-known hosts in parallel (loopback 9200/9201 +
