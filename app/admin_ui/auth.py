@@ -51,7 +51,8 @@ def create_ui_session_for_key_id(key_id: str) -> str:
 
 def get_ui_key_id(request: Request) -> str | None:
     token = request.cookies.get(SESSION_COOKIE)
-    return container.store.get_ui_session_key_id(token)
+    idle = container.config_manager.config.auth.admin_session_idle_timeout_minutes
+    return container.store.get_ui_session_key_id(token, idle_timeout_minutes=int(idle))
 
 
 def require_ui_session(request: Request) -> str:

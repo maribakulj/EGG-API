@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Sprint 18 — hardening + ops endpoints**:
+  - Admin UI sessions now honour an **idle timeout** (migration 8
+    adds `ui_sessions.last_activity_at`; `auth.admin_session_idle_timeout_minutes`
+    defaults to 15). Every successful session lookup bumps the
+    timestamp; the TTL and idle checks run in the same store call.
+  - New **public-API 401 lockout** (`app/rate_limit/lockout.py`):
+    per-IP sliding-window counter. Once
+    `auth.public_401_lockout_threshold` 401s are observed within
+    `auth.public_401_lockout_window_seconds`, every subsequent
+    request from the same IP is short-circuited with 429 until the
+    window rolls over. A new middleware in `app.main` applies this
+    to `/v1/*` only; the admin login keeps its own brute-force guard.
+  - **Template mapper whitelist** (`app/mappers/schema_mapper.py`):
+    `FieldMapping.allowed_fields` constrains which backend keys a
+    `template` rule may substitute. When empty, the mapper falls
+    back to the names literally referenced by the template string —
+    keeping legacy configs working while refusing to interpolate any
+    `_score`/`_version`/etc. sneaking in through `doc`.
+  - New `GET /admin/v1/logs` (SPECS §13.12): filterable structured
+    log query with `endpoint`, `status_min`/`status_max`, `since`,
+    `until`, `key_id`, pagination. Backs the admin dashboard's
+    activity panel and integrator ops scripts.
+  - New `GET /admin/v1/export-config` + `POST /admin/v1/import-config`
+    (SPECS §13.15-16): YAML round-trip with the same redaction
+    policy as `ConfigManager.save()` (bootstrap key + inline backend
+    secrets stripped).
 - **Sprint 17 — desktop packaging** (Briefcase + pywebview):
   - New `app/desktop.py` entry point (`egg-api-desktop`). Runs
     uvicorn in a daemon thread, primes the config/DB on first launch,

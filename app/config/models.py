@@ -139,6 +139,16 @@ class AuthConfig(BaseModel):
     admin_cookie_secure: bool = True
     admin_cookie_samesite: SameSite = "strict"
     admin_session_ttl_hours: int = 12
+    # Idle timeout: kick admin UI sessions that have not seen any
+    # request for ``admin_session_idle_timeout_minutes``. 0 disables
+    # the check (legacy behaviour). Sprint 18 default: 15 minutes.
+    admin_session_idle_timeout_minutes: int = 15
+    # Max sequential 401s a public-API caller may trigger before EGG
+    # starts refusing *every* subsequent request from the same IP
+    # with 429 for ``public_401_lockout_window_seconds``. Set to 0
+    # to disable the lockout entirely.
+    public_401_lockout_threshold: int = 20
+    public_401_lockout_window_seconds: int = 300
 
 
 class ProxyConfig(BaseModel):
@@ -183,6 +193,12 @@ class FieldMapping(BaseModel):
     sources: list[str] = Field(default_factory=list)
     separator: str = ";"
     template: str | None = None
+    # Mode ``template`` only. Explicit allowlist of backend field names
+    # the Python ``Template`` may substitute. When empty the mapper
+    # falls back to the names literally referenced by the template
+    # string itself, which keeps legacy configs working while still
+    # refusing to echo any other backend field (Sprint 18 hardening).
+    allowed_fields: list[str] = Field(default_factory=list)
     criticality: Criticality = "optional"
 
 

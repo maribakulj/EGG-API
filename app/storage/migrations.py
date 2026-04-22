@@ -167,6 +167,23 @@ def _m007_setup_otps(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_setup_otps_expires ON setup_otps(expires_at)")
 
 
+def _m008_ui_sessions_last_activity(conn: sqlite3.Connection) -> None:
+    """Sprint 18: track per-session last-activity timestamp for idle timeout.
+
+    The TTL column already caps absolute session lifetime. Idle
+    timeout is a different policy: kick the session after N minutes
+    without a real request. Legacy rows get their ``created_at`` as
+    the initial ``last_activity_at`` so the first request after the
+    migration does not look anomalously old.
+    """
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(ui_sessions)").fetchall()}
+    if "last_activity_at" not in cols:
+        conn.execute("ALTER TABLE ui_sessions ADD COLUMN last_activity_at TEXT")
+        conn.execute(
+            "UPDATE ui_sessions SET last_activity_at = created_at WHERE last_activity_at IS NULL"
+        )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(1, "baseline", _m001_baseline),
     Migration(2, "ui_sessions_expires_at", _m002_ui_sessions_expires_at),
@@ -179,6 +196,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(5, "api_keys_hash_variant", _m005_api_keys_hash_variant),
     Migration(6, "setup_drafts", _m006_setup_drafts),
     Migration(7, "setup_otps", _m007_setup_otps),
+    Migration(8, "ui_sessions_last_activity", _m008_ui_sessions_last_activity),
 )
 
 
@@ -216,6 +234,7 @@ def _baseline_pre_existing_db(conn: sqlite3.Connection, applied: set[int]) -> se
       - If `api_keys.hash_variant` column exists, 5 is applied.
       - If `setup_drafts` exists, 6 is applied.
       - If `setup_otps` exists, 7 is applied.
+      - If `ui_sessions.last_activity_at` column exists, 8 is applied.
     """
     if applied:
         return applied
@@ -243,6 +262,10 @@ def _baseline_pre_existing_db(conn: sqlite3.Connection, applied: set[int]) -> se
         baselined.add(6)
     if _has_table("setup_otps"):
         baselined.add(7)
+    if _has_table("ui_sessions"):
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(ui_sessions)").fetchall()}
+        if "last_activity_at" in cols:
+            baselined.add(8)
 
     if baselined:
         now = datetime.now(timezone.utc).isoformat()

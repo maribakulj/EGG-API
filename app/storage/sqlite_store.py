@@ -264,20 +264,30 @@ class SQLiteStore:
         expires_at = (now + timedelta(hours=max(1, int(ttl_hours)))).isoformat()
         with self._connect() as conn:
             conn.execute(
-                "INSERT INTO ui_sessions(token, key_id, created_at, expires_at) "
-                "VALUES (?, ?, ?, ?)",
-                (token_hash, key_id, now.isoformat(), expires_at),
+                "INSERT INTO ui_sessions(token, key_id, created_at, expires_at, "
+                "last_activity_at) VALUES (?, ?, ?, ?, ?)",
+                (token_hash, key_id, now.isoformat(), expires_at, now.isoformat()),
             )
         return token
 
-    def get_ui_session_key_id(self, token: str | None) -> str | None:
+    def get_ui_session_key_id(
+        self, token: str | None, *, idle_timeout_minutes: int = 0
+    ) -> str | None:
+        """Return the ``key_id`` owning ``token``, or ``None``.
+
+        ``idle_timeout_minutes`` (0 = disabled) kicks sessions that
+        have not seen any activity for N minutes. Every successful
+        lookup bumps ``last_activity_at``, which also serves as a
+        telemetry anchor for ``/admin/v1/status``.
+        """
         if not token:
             return None
         token_hash = self._hash_session_token(token)
-        now_iso = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(timezone.utc)
+        now_iso = now.isoformat()
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT key_id, expires_at FROM ui_sessions WHERE token = ?",
+                "SELECT key_id, expires_at, last_activity_at FROM ui_sessions WHERE token = ?",
                 (token_hash,),
             ).fetchone()
             if not row:
@@ -286,6 +296,19 @@ class SQLiteStore:
             if expires_at is not None and expires_at <= now_iso:
                 conn.execute("DELETE FROM ui_sessions WHERE token = ?", (token_hash,))
                 return None
+            # Idle timeout: kick if the last activity predates the cutoff.
+            if idle_timeout_minutes > 0:
+                last = row["last_activity_at"] or row["expires_at"] or now_iso
+                cutoff = (now - timedelta(minutes=int(idle_timeout_minutes))).isoformat()
+                if last <= cutoff:
+                    conn.execute("DELETE FROM ui_sessions WHERE token = ?", (token_hash,))
+                    return None
+            # Touch the activity timestamp so subsequent reads shift
+            # the idle window forward.
+            conn.execute(
+                "UPDATE ui_sessions SET last_activity_at = ? WHERE token = ?",
+                (now_iso, token_hash),
+            )
         return str(row["key_id"])
 
     def invalidate_sessions_for_key_id(self, key_id: str) -> int:
@@ -469,6 +492,66 @@ class SQLiteStore:
                 (safe_limit, safe_offset),
             ).fetchall()
         return [UsageEvent(**dict(row)) for row in rows]
+
+    def query_usage_events(
+        self,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+        endpoint: str | None = None,
+        status_min: int | None = None,
+        status_max: int | None = None,
+        since: str | None = None,
+        until: str | None = None,
+        key_id: str | None = None,
+    ) -> tuple[list[UsageEvent], int]:
+        """Filterable log query backing ``GET /admin/v1/logs``.
+
+        Returns ``(page, total_matching)``. Every filter is optional;
+        an omitted filter is not applied. Time filters accept the same
+        ISO-8601 string format we write to the column, making
+        ``since=2026-04-20T00:00:00+00:00`` a drop-in match.
+        """
+        safe_limit = max(1, min(int(limit), 1000))
+        safe_offset = max(0, int(offset))
+        where: list[str] = []
+        params: list[object] = []
+        if endpoint:
+            where.append("endpoint = ?")
+            params.append(endpoint)
+        if status_min is not None:
+            where.append("status_code >= ?")
+            params.append(int(status_min))
+        if status_max is not None:
+            where.append("status_code <= ?")
+            params.append(int(status_max))
+        if since:
+            where.append("timestamp >= ?")
+            params.append(since)
+        if until:
+            where.append("timestamp <= ?")
+            params.append(until)
+        if key_id:
+            where.append("api_key_id = ?")
+            params.append(key_id)
+        where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+        with self._connect() as conn:
+            total_row = conn.execute(
+                f"SELECT COUNT(*) AS c FROM usage_events {where_sql}",  # noqa: S608
+                params,
+            ).fetchone()
+            total = int(total_row["c"]) if total_row else 0
+            rows = conn.execute(
+                f"""
+                SELECT timestamp, endpoint, method, status_code, api_key_id, subject, latency_ms, error_code
+                FROM usage_events
+                {where_sql}
+                ORDER BY id DESC
+                LIMIT ? OFFSET ?
+                """,  # noqa: S608
+                (*params, safe_limit, safe_offset),
+            ).fetchall()
+        return [UsageEvent(**dict(row)) for row in rows], total
 
     def count_usage_events(self) -> int:
         with self._connect() as conn:

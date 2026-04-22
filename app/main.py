@@ -219,6 +219,38 @@ def _route_template(request: Request, fallback: str) -> str:
 
 
 @app.middleware("http")
+async def public_auth_lockout_middleware(request: Request, call_next):
+    """Short-circuit locked-out IPs on the public API (Sprint 18).
+
+    Counters are only bumped for 401s on ``/v1/*`` so the admin
+    surface keeps its own brute-force guard (login rate limiter).
+    """
+    path = request.url.path
+    client_host = request.client.host if request.client else "anonymous"
+    lockout = container.public_lockout
+    is_public = path.startswith("/v1/")
+
+    if is_public and lockout.is_locked(client_host):
+        rate_limit_hits.labels(scope="public_auth_lockout").inc()
+        return JSONResponse(
+            status_code=429,
+            content={
+                "error": {
+                    "code": "rate_limited",
+                    "message": "Too many invalid credentials from this IP.",
+                    "details": {"scope": "public_auth"},
+                    "request_id": request.headers.get("x-request-id", "generated"),
+                }
+            },
+        )
+
+    response = await call_next(request)
+    if is_public and response.status_code == 401:
+        lockout.record_failure(client_host)
+    return response
+
+
+@app.middleware("http")
 async def usage_audit_middleware(request: Request, call_next):
     started = time.monotonic()
     request_id = get_request_id(request)

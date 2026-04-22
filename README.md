@@ -368,6 +368,9 @@ All admin routes require `x-api-key: <admin-key>`.
 | `GET  /admin/v1/keys/{key_id}` | Fetch a single key's public record |
 | `PATCH /admin/v1/keys/{key_id}` | `{"action": "activate\|suspend\|revoke\|rotate"}` |
 | `DELETE /admin/v1/keys/{key_id}` | Soft-delete: revoke + invalidate sessions |
+| `GET  /admin/v1/logs?…` | Filterable structured-log query (SPECS §13.12) |
+| `GET  /admin/v1/export-config` | Dump the active config as redacted YAML |
+| `POST /admin/v1/import-config` | Validate + swap to a new config body (JSON) |
 
 ### Example
 

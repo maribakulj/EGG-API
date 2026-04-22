@@ -70,8 +70,41 @@ def _apply_first_non_empty(rule: dict[str, Any], doc: dict[str, Any]) -> Any:
     return None
 
 
+_TEMPLATE_PLACEHOLDER_RE = __import__("re").compile(r"\$\{?([a-zA-Z_][a-zA-Z0-9_]*)\}?")
+
+
+def _resolve_template_allowlist(rule: dict[str, Any]) -> frozenset[str]:
+    """Return the set of backend fields a template rule may substitute.
+
+    ``allowed_fields`` is the explicit opt-in. When absent, fall back
+    to the set of names literally referenced by the template string
+    itself — that keeps existing configs working while still refusing
+    to interpolate any other key the backend might add to the record
+    (``_score``, ``_version``, etc.).
+    """
+    explicit = rule.get("allowed_fields") or []
+    if isinstance(explicit, list) and explicit:
+        return frozenset(str(x) for x in explicit)
+    template = rule.get("template") or ""
+    return frozenset(_TEMPLATE_PLACEHOLDER_RE.findall(template))
+
+
 def _apply_template(rule: dict[str, Any], doc: dict[str, Any]) -> Any:
-    return Template(rule.get("template") or "").safe_substitute(doc)
+    template = rule.get("template") or ""
+    allow = _resolve_template_allowlist(rule)
+
+    # Strip any ``$name`` placeholder whose name is not on the
+    # allowlist *before* substitution. That way a template like
+    # ``"$title $leaked"`` with only ``title`` allowed renders
+    # ``"A "`` instead of leaking the literal ``$leaked`` back to
+    # the caller.
+    def _drop_if_not_allowed(match) -> str:  # type: ignore[no-untyped-def]
+        name = match.group(1)
+        return match.group(0) if name in allow else ""
+
+    pruned = _TEMPLATE_PLACEHOLDER_RE.sub(_drop_if_not_allowed, template)
+    safe_doc: dict[str, Any] = {name: doc.get(name, "") for name in allow}
+    return Template(pruned).safe_substitute(safe_doc)
 
 
 def _apply_nested_object(rule: dict[str, Any], doc: dict[str, Any]) -> Any:

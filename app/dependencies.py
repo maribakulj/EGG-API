@@ -16,6 +16,7 @@ from app.config.models import AppConfig
 from app.mappers.schema_mapper import MappingHealthService, SchemaMapper
 from app.query_policy.engine import QueryPolicyEngine
 from app.rate_limit.limiter import InMemoryRateLimiter
+from app.rate_limit.lockout import PublicAuthLockout
 from app.rate_limit.redis_limiter import RedisRateLimiter, build_rate_limiter
 from app.runtime_paths import get_state_db_path, resolve_bootstrap_admin_key
 from app.storage.sqlite_store import SQLiteStore
@@ -126,6 +127,17 @@ class Container:
         self._reload_lock = threading.RLock()
         config_manager = ConfigManager(require_existing=False)
         self._state: ContainerState = _build_state(config_manager)
+        self._public_lockout = _build_public_lockout(config_manager.config)
+
+    @property
+    def public_lockout(self) -> PublicAuthLockout:
+        """Per-IP 401 lockout (Sprint 18). Reloaded with the config."""
+        return self._public_lockout
+
+    @public_lockout.setter
+    def public_lockout(self, value: PublicAuthLockout) -> None:
+        # Tests swap the lockout directly to tighten the threshold.
+        self._public_lockout = value
 
     # --- Atomic reference to the current state -------------------------
     @property
@@ -290,6 +302,7 @@ class Container:
             # Single assignment: readers see either ``previous`` or
             # ``new_state`` — nothing in between.
             self._state = new_state
+            self._public_lockout = _build_public_lockout(config)
 
             # Release the orphaned httpx client so we don't leak FDs.
             client = getattr(previous.adapter, "client", None)
@@ -298,6 +311,13 @@ class Container:
                     client.close()
                 except Exception:
                     logger.exception("previous_adapter_close_failed")
+
+
+def _build_public_lockout(config: AppConfig) -> PublicAuthLockout:
+    return PublicAuthLockout(
+        threshold=config.auth.public_401_lockout_threshold,
+        window_seconds=config.auth.public_401_lockout_window_seconds,
+    )
 
 
 container = Container()
