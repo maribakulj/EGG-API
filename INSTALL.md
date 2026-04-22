@@ -1,30 +1,39 @@
 # Installation and Local Operations
 
-## 1) Install
+## Recommended first run (single command)
 
 ```bash
 ./scripts/setup.sh
+egg-api start
 ```
 
-## 2) Initialize local runtime files
+`egg-api start` is the first-run-friendly launcher introduced in
+Sprint 16. It:
+
+1. creates `config/egg.yaml` + the state DB if they do not exist;
+2. generates the bootstrap admin key and **prints it to the terminal**
+   (and also stores it in `data/bootstrap_admin.key`, 0600);
+3. mints a one-time magic link
+   `http://127.0.0.1:8000/admin/setup-otp/<token>` that opens the
+   admin UI wizard without the login form;
+4. opens that URL in the default browser (pass `--no-browser` on
+   headless hosts — the link is still printed to stdout);
+5. drops into uvicorn so the service actually answers.
+
+The magic link is single-use and expires after 5 minutes. A subsequent
+`egg-api start` reuses the existing key and mints a fresh link.
+
+## Manual flow (operator-oriented)
 
 ```bash
-egg-api init
+./scripts/setup.sh          # venv + editable install
+egg-api init                # scaffold config + state DB
+egg-api check-config        # validate egg.yaml
+egg-api run                 # production-style (no --reload)
+# or: make dev              # auto-reload for development
 ```
 
-## 3) Validate configuration
-
-```bash
-egg-api check-config
-```
-
-## 4) Start service
-
-```bash
-egg-api run --reload
-```
-
-## 5) Useful operations
+## Useful operations
 
 ```bash
 egg-api print-paths

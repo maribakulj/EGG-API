@@ -22,6 +22,7 @@ from app.admin_ui.auth import (
     SESSION_COOKIE,
     clear_ui_session,
     create_ui_session_for_api_key,
+    create_ui_session_for_key_id,
     get_csrf_for_request,
     get_ui_key_id,
     verify_csrf,
@@ -149,6 +150,34 @@ def _set_session_cookie(response, token: str) -> None:
 def login_page(request: Request) -> HTMLResponse:
     """Render the admin sign-in form."""
     return _render("login.html", request)
+
+
+@router.get("/setup-otp/{token}")
+def setup_otp_exchange(token: str, request: Request):
+    """Exchange a first-run OTP for an admin UI session.
+
+    Minted by ``egg-api start``. The token is single-use, short-lived
+    and hashed at rest; on success the caller is redirected to the
+    setup wizard landing page with a session cookie set. On failure
+    we render the login page so the operator can fall back to typing
+    the bootstrap key.
+    """
+    key_id = container.store.consume_setup_otp(token)
+    if key_id is None:
+        return _render(
+            "login.html",
+            request,
+            error=(
+                "This one-time link has expired or was already used. "
+                "Sign in with the bootstrap admin key printed by "
+                "`egg-api start`, or mint a new link."
+            ),
+            status_code=401,
+        )
+    session = create_ui_session_for_key_id(key_id)
+    response = RedirectResponse("/admin/ui/setup", status_code=303)
+    _set_session_cookie(response, session)
+    return response
 
 
 @router.post("/login", response_class=HTMLResponse)

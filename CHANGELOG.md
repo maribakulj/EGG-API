@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Sprint 16 — first-run UX**:
+  - New `egg-api start` command: generates the bootstrap admin key,
+    prints it once to the terminal, mints a one-time magic link
+    (`/admin/setup-otp/<token>`, 5-min TTL, hashed at rest), opens
+    the default browser (skippable via `--no-browser`) and drops
+    into uvicorn. Idempotent: a second run reuses the existing key.
+  - New `/admin/setup-otp/{token}` route exchanges the OTP for an
+    admin UI session and bounces to `/admin/ui/setup`; replayed or
+    expired tokens surface the login page with a clear message.
+  - New migration 7 creates `setup_otps`; `SQLiteStore` gains
+    `create_setup_otp` / `consume_setup_otp` /
+    `purge_expired_setup_otps`.
+  - New `app/user_errors.py` translates common `AppError` codes and
+    Pydantic `ValidationError` payloads into plain-language messages
+    with a suggestion. `egg-api check-config` / `check-backend`
+    now surface those translations instead of raw exceptions.
 - **Sprint 15 — setup wizard, screens 4-8 + publish** (SPECS §26):
   completes the guided flow. New screens under `/admin/ui/setup`:
   *security* (profile + public mode), *exposure*

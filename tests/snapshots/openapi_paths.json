@@ -12,6 +12,7 @@
     "/admin/login",
     "/admin/logout",
     "/admin/logout-everywhere",
+    "/admin/setup-otp/{token}",
     "/admin/ui",
     "/admin/ui/config",
     "/admin/ui/keys",

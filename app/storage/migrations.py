@@ -143,6 +143,30 @@ def _m006_setup_drafts(conn: sqlite3.Connection) -> None:
     )
 
 
+def _m007_setup_otps(conn: sqlite3.Connection) -> None:
+    """Sprint 16: one-time tokens for the first-run magic link.
+
+    ``egg-api start`` mints an OTP that, when exchanged at
+    ``/admin/setup-otp/<token>``, issues a fresh admin UI session
+    without forcing the operator to copy-paste the bootstrap key into
+    the login form. Tokens are single-use, short-lived (5 minutes by
+    default) and hashed at rest — the raw value is only ever shown
+    to the terminal that minted it.
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS setup_otps (
+            token_hash TEXT PRIMARY KEY,
+            key_id TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            consumed_at TEXT
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_setup_otps_expires ON setup_otps(expires_at)")
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(1, "baseline", _m001_baseline),
     Migration(2, "ui_sessions_expires_at", _m002_ui_sessions_expires_at),
@@ -154,6 +178,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(4, "retire_quota_counters", _m004_retire_quota_counters),
     Migration(5, "api_keys_hash_variant", _m005_api_keys_hash_variant),
     Migration(6, "setup_drafts", _m006_setup_drafts),
+    Migration(7, "setup_otps", _m007_setup_otps),
 )
 
 
@@ -190,6 +215,7 @@ def _baseline_pre_existing_db(conn: sqlite3.Connection, applied: set[int]) -> se
       - If `quota_counters` does not exist, 4 is applied.
       - If `api_keys.hash_variant` column exists, 5 is applied.
       - If `setup_drafts` exists, 6 is applied.
+      - If `setup_otps` exists, 7 is applied.
     """
     if applied:
         return applied
@@ -215,6 +241,8 @@ def _baseline_pre_existing_db(conn: sqlite3.Connection, applied: set[int]) -> se
             baselined.add(5)
     if _has_table("setup_drafts"):
         baselined.add(6)
+    if _has_table("setup_otps"):
+        baselined.add(7)
 
     if baselined:
         now = datetime.now(timezone.utc).isoformat()

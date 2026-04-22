@@ -392,6 +392,9 @@ curl -s -X PATCH -H "x-api-key: $ADMIN_KEY" -H 'content-type: application/json' 
 Same-origin console at `/admin/*`, served by Jinja2 templates (autoescape enforced):
 
 - `/admin/login` — bootstrap form (rate-limited).
+- `/admin/setup-otp/{token}` — one-time magic-link login minted by
+  `egg-api start` (Sprint 16). Single-use, 5-minute TTL, hashed at
+  rest. Use the CLI instead of hand-crafting URLs.
 - `/admin/ui` — dashboard (service + backend health, usage summary).
 - `/admin/ui/setup` — **setup wizard** (8 steps, SPECS §26): a guided
   flow covering backend → source → mapping → security → exposure →

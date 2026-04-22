@@ -349,6 +349,69 @@ class SQLiteStore:
         with self._connect() as conn:
             conn.execute("DELETE FROM setup_drafts WHERE key_id = ?", (key_id,))
 
+    # -- First-run OTP tokens (Sprint 16) ------------------------------------
+    def create_setup_otp(self, key_id: str, *, ttl_seconds: int = 300) -> str:
+        """Mint a one-time token redeemable at ``/admin/setup-otp/{token}``.
+
+        Returns the raw token (shown once to the CLI user). Only its
+        SHA-256 hash lands in the DB, so an attacker with read access
+        to the state file cannot replay it.
+        """
+        token = secrets.token_urlsafe(24)
+        digest = hashlib.sha256(token.encode()).hexdigest()
+        now = datetime.now(timezone.utc)
+        expires = (now + timedelta(seconds=max(30, int(ttl_seconds)))).isoformat()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO setup_otps(token_hash, key_id, created_at, expires_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (digest, key_id, now.isoformat(), expires),
+            )
+        return token
+
+    def consume_setup_otp(self, token: str | None) -> str | None:
+        """Spend the OTP and return the owner ``key_id``, or ``None``.
+
+        The token is matched by hash, must not be expired, and must not
+        have been consumed already. Consumption is recorded inline so a
+        replay attempt gets ``None`` rather than a second admin session.
+        """
+        if not token:
+            return None
+        digest = hashlib.sha256(token.encode()).hexdigest()
+        now = datetime.now(timezone.utc)
+        now_iso = now.isoformat()
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT key_id, expires_at, consumed_at
+                FROM setup_otps WHERE token_hash = ?
+                """,
+                (digest,),
+            ).fetchone()
+            if row is None:
+                return None
+            if row["consumed_at"] is not None:
+                return None
+            if row["expires_at"] <= now_iso:
+                return None
+            conn.execute(
+                "UPDATE setup_otps SET consumed_at = ? WHERE token_hash = ?",
+                (now_iso, digest),
+            )
+        return str(row["key_id"])
+
+    def purge_expired_setup_otps(self) -> int:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            cur = conn.execute(
+                "DELETE FROM setup_otps WHERE expires_at <= ? OR consumed_at IS NOT NULL",
+                (now_iso,),
+            )
+        return int(cur.rowcount or 0)
+
     def purge_usage_events_older_than(self, retention_days: int) -> int:
         """Delete usage_events rows whose ISO timestamp predates the cutoff.
 
