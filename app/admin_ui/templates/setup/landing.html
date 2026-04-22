@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Setup wizard</h2>
+<p class="help">
+  Walk through three guided steps to connect a backend, pick a source,
+  and propose a field mapping. Nothing is saved to the active config
+  until you reach the last screen.
+</p>
+
+{% if has_active_config %}
+<div class="panel">
+  <h3>An active configuration already exists</h3>
+  <p>The wizard will prepare a new configuration in a draft. The current
+  service keeps running on the existing config until you publish the
+  new one.</p>
+  <ul>
+    <li>Active backend: <code class="muted">{{ cfg.backend.url or '(empty)' }}</code></li>
+    <li>Active source: <code class="muted">{{ cfg.backend.index or '(empty)' }}</code></li>
+  </ul>
+</div>
+{% endif %}
+
+{% if draft_exists %}
+<div class="panel">
+  <h3>Resume your previous draft</h3>
+  <p class="help">You started a wizard session earlier. You can continue where you left off, or start over.</p>
+  <form class="inline-form" method="post" action="/admin/ui/setup/reset">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <a href="/admin/ui/setup/{{ current_step }}"><button type="button">Resume at step: {{ current_step }}</button></a>
+    <button type="submit" class="secondary">Discard draft and start over</button>
+  </form>
+</div>
+{% else %}
+<form class="inline-form" method="post" action="/admin/ui/setup/start">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+  <button type="submit">Start the wizard</button>
+</form>
+{% endif %}
+{% endblock %}

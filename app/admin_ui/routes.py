@@ -26,6 +26,14 @@ from app.admin_ui.auth import (
     get_ui_key_id,
     verify_csrf,
 )
+from app.admin_ui.setup_service import (
+    WIZARD_STEPS,
+    SetupDraft,
+    SetupDraftService,
+    build_probe_adapter,
+    extract_index_choices,
+    propose_mapping,
+)
 from app.auth.key_service import ApiKeyService
 from app.config.models import AppConfig
 from app.dependencies import container
@@ -46,6 +54,23 @@ templates.env.autoescape = True
 def _key_service() -> ApiKeyService:
     # Resolve per request so Container.reload() hot-swaps take effect.
     return ApiKeyService(container.api_keys, container.store)
+
+
+def _setup_service() -> SetupDraftService:
+    return SetupDraftService(container.store)
+
+
+def _require_login_key_id(request: Request) -> tuple[str, None] | tuple[None, RedirectResponse]:
+    """Return the signed-in ``key_id`` or a login redirect.
+
+    Split from ``_require_login`` because the wizard needs the key_id
+    itself (drafts are per-admin) whereas the rest of the UI only
+    cares whether somebody is signed in.
+    """
+    key_id = get_ui_key_id(request)
+    if key_id is None:
+        return None, RedirectResponse("/admin/login", status_code=303)
+    return key_id, None
 
 
 async def _form(request: Request) -> dict[str, str]:
@@ -436,3 +461,376 @@ def usage_page(request: Request):
         return guard
     events = container.store.list_recent_usage_events(limit=100)
     return _render("usage.html", request, events=events)
+
+
+# ---------------------------------------------------------------------------
+# Setup wizard (Sprint 14 — screens 1-4)
+#
+# Per SPECS §26 the wizard is the non-technical operator's first contact
+# with the product. Every screen is a server-rendered form with one
+# clear action; progress is persisted in ``setup_drafts`` scoped by the
+# signed-in admin ``key_id`` so a refresh or tab close never loses work.
+# Nothing written here reaches ``egg.yaml`` — Sprint 15 adds the final
+# "Publish" step.
+# ---------------------------------------------------------------------------
+
+
+def _render_wizard(
+    request: Request,
+    template: str,
+    *,
+    draft: SetupDraft,
+    current_step: str,
+    message: str | None = None,
+    error: str | None = None,
+    status_code: int = 200,
+    **extra: object,
+) -> HTMLResponse:
+    return _render(
+        template,
+        request,
+        status_code=status_code,
+        draft=draft,
+        current_step=current_step,
+        message=message,
+        error=error,
+        **extra,
+    )
+
+
+@router.get("/ui/setup", response_class=HTMLResponse)
+def setup_landing(request: Request):
+    """Wizard landing page: propose to start or resume a draft."""
+    key_id, redirect = _require_login_key_id(request)
+    if redirect is not None:
+        return redirect
+    _, step = _setup_service().load(key_id)
+    row = container.store.load_setup_draft(key_id)
+    cfg = container.config_manager.config
+    return _render(
+        "setup/landing.html",
+        request,
+        draft_exists=row is not None,
+        current_step=step,
+        has_active_config=bool(cfg.backend.url),
+        cfg=cfg,
+    )
+
+
+@router.post("/ui/setup/start", response_class=HTMLResponse)
+async def setup_start(request: Request):
+    """Create an empty draft and jump to the first step."""
+    key_id, redirect = _require_login_key_id(request)
+    if redirect is not None:
+        return redirect
+    csrf_error = await _enforce_csrf(request)
+    if csrf_error is not None:
+        return csrf_error
+    _setup_service().save(key_id, SetupDraft(), WIZARD_STEPS[0])
+    return RedirectResponse("/admin/ui/setup/backend", status_code=303)
+
+
+@router.post("/ui/setup/reset", response_class=HTMLResponse)
+async def setup_reset(request: Request):
+    """Discard the current draft and bounce back to the landing screen."""
+    key_id, redirect = _require_login_key_id(request)
+    if redirect is not None:
+        return redirect
+    csrf_error = await _enforce_csrf(request)
+    if csrf_error is not None:
+        return csrf_error
+    _setup_service().reset(key_id)
+    return RedirectResponse("/admin/ui/setup", status_code=303)
+
+
+# -- Step 1: backend ------------------------------------------------------
+
+
+def _draft_from_backend_form(data: dict[str, str], previous: SetupDraft) -> SetupDraft:
+    """Apply step-1 form fields to the draft, preserving stashed secrets.
+
+    Inline secrets (``auth.password`` / ``auth.token``) are kept when
+    the operator submits the form with the field blank — otherwise
+    navigating to the next step would wipe a valid inline credential.
+    """
+    previous_auth = previous.backend.get("auth") or {}
+    mode = (data.get("auth_mode") or "none").strip() or "none"
+    submitted_password = data.get("auth_password") or ""
+    submitted_token = data.get("auth_token") or ""
+    auth: dict[str, object] = {"mode": mode}
+    if mode == "basic":
+        auth["username"] = (data.get("auth_username") or "").strip() or None
+        auth["password_env"] = (data.get("auth_password_env") or "").strip() or None
+        auth["password"] = submitted_password or previous_auth.get("password") or None
+    if mode in {"bearer", "api_key"}:
+        auth["token_env"] = (data.get("auth_token_env") or "").strip() or None
+        auth["token"] = submitted_token or previous_auth.get("token") or None
+    draft = SetupDraft(
+        backend={
+            "type": (data.get("backend_type") or "elasticsearch").strip(),
+            "url": (data.get("backend_url") or "").strip(),
+            "auth": auth,
+        },
+        source=dict(previous.source),
+        detected_version=previous.detected_version,
+        available_indices=list(previous.available_indices),
+        available_fields=dict(previous.available_fields),
+        mapping={k: dict(v) for k, v in previous.mapping.items()},
+    )
+    return draft
+
+
+@router.get("/ui/setup/backend", response_class=HTMLResponse)
+def setup_backend_page(request: Request):
+    key_id, redirect = _require_login_key_id(request)
+    if redirect is not None:
+        return redirect
+    draft, _ = _setup_service().load(key_id)
+    return _render_wizard(request, "setup/backend.html", draft=draft, current_step="backend")
+
+
+@router.post("/ui/setup/backend", response_class=HTMLResponse)
+async def setup_backend_submit(request: Request):
+    key_id, redirect = _require_login_key_id(request)
+    if redirect is not None:
+        return redirect
+    csrf_error = await _enforce_csrf(request)
+    if csrf_error is not None:
+        return csrf_error
+
+    data = await _form(request)
+    svc = _setup_service()
+    previous, _ = svc.load(key_id)
+    try:
+        draft = _draft_from_backend_form(data, previous)
+    except AppError as exc:
+        return _render_wizard(
+            request,
+            "setup/backend.html",
+            draft=previous,
+            current_step="backend",
+            error=exc.message,
+            status_code=exc.status_code,
+        )
+
+    action = data.get("action", "next")
+    if action == "test":
+        # Probe the candidate backend without committing the step.  On
+        # success we record the version so the operator has feedback;
+        # on failure we show the error but keep the form values.
+        try:
+            adapter = build_probe_adapter(draft)
+            probe = adapter.detect()
+        except AppError as exc:
+            svc.save(key_id, draft, "backend")
+            return _render_wizard(
+                request,
+                "setup/backend.html",
+                draft=draft,
+                current_step="backend",
+                error=f"Could not reach the backend: {exc.message}",
+                status_code=400,
+            )
+        except Exception:
+            svc.save(key_id, draft, "backend")
+            logger.exception("setup_backend_probe_failed", key_id=key_id)
+            return _render_wizard(
+                request,
+                "setup/backend.html",
+                draft=draft,
+                current_step="backend",
+                error=(
+                    "Unexpected error while contacting the backend. "
+                    "Check the URL, credentials, and server logs."
+                ),
+                status_code=400,
+            )
+        version_info = probe.get("version", {}) if isinstance(probe, dict) else {}
+        draft.detected_version = str(version_info.get("number") or "") or None
+        svc.save(key_id, draft, "backend")
+        return _render_wizard(
+            request,
+            "setup/backend.html",
+            draft=draft,
+            current_step="backend",
+            message="Connection successful.",
+            probe_result={"version": draft.detected_version or "(unknown)"},
+        )
+
+    # action == "next"
+    if not draft.backend.get("url"):
+        return _render_wizard(
+            request,
+            "setup/backend.html",
+            draft=draft,
+            current_step="backend",
+            error="Backend URL is required.",
+            status_code=400,
+        )
+    svc.save(key_id, draft, "source")
+    return RedirectResponse("/admin/ui/setup/source", status_code=303)
+
+
+# -- Step 2: source -------------------------------------------------------
+
+
+@router.get("/ui/setup/source", response_class=HTMLResponse)
+def setup_source_page(request: Request):
+    key_id, redirect = _require_login_key_id(request)
+    if redirect is not None:
+        return redirect
+    draft, _ = _setup_service().load(key_id)
+    if not draft.backend.get("url"):
+        return RedirectResponse("/admin/ui/setup/backend", status_code=303)
+    return _render_wizard(request, "setup/source.html", draft=draft, current_step="source")
+
+
+@router.post("/ui/setup/source", response_class=HTMLResponse)
+async def setup_source_submit(request: Request):
+    key_id, redirect = _require_login_key_id(request)
+    if redirect is not None:
+        return redirect
+    csrf_error = await _enforce_csrf(request)
+    if csrf_error is not None:
+        return csrf_error
+
+    data = await _form(request)
+    svc = _setup_service()
+    draft, _ = svc.load(key_id)
+    if not draft.backend.get("url"):
+        return RedirectResponse("/admin/ui/setup/backend", status_code=303)
+
+    draft.source["index"] = (data.get("index") or "").strip()
+    action = data.get("action", "next")
+
+    if action == "scan":
+        try:
+            adapter = build_probe_adapter(draft)
+            payload = adapter.scan_fields()
+        except AppError as exc:
+            svc.save(key_id, draft, "source")
+            return _render_wizard(
+                request,
+                "setup/source.html",
+                draft=draft,
+                current_step="source",
+                error=f"Could not scan the backend: {exc.message}",
+                status_code=exc.status_code,
+            )
+        except Exception:
+            svc.save(key_id, draft, "source")
+            logger.exception("setup_scan_failed", key_id=key_id)
+            return _render_wizard(
+                request,
+                "setup/source.html",
+                draft=draft,
+                current_step="source",
+                error="Unexpected error while scanning the backend.",
+                status_code=400,
+            )
+        indices, fields = extract_index_choices(payload if isinstance(payload, dict) else {})
+        draft.available_indices = indices
+        draft.available_fields = fields
+        if not draft.source["index"] and len(indices) == 1:
+            draft.source["index"] = indices[0]
+        svc.save(key_id, draft, "source")
+        return _render_wizard(
+            request,
+            "setup/source.html",
+            draft=draft,
+            current_step="source",
+            message=f"Found {len(indices)} index(es) and {len(fields)} field(s).",
+        )
+
+    # action == "next"
+    if not draft.source.get("index"):
+        return _render_wizard(
+            request,
+            "setup/source.html",
+            draft=draft,
+            current_step="source",
+            error="Please enter or pick an index before continuing.",
+            status_code=400,
+        )
+    # Pre-fill a mapping proposal once we land on step 3 — only when the
+    # operator hasn't started editing one yet.
+    if not draft.mapping and draft.available_fields:
+        draft.mapping = propose_mapping(draft.available_fields)
+    svc.save(key_id, draft, "mapping")
+    return RedirectResponse("/admin/ui/setup/mapping", status_code=303)
+
+
+# -- Step 3: mapping ------------------------------------------------------
+
+
+@router.get("/ui/setup/mapping", response_class=HTMLResponse)
+def setup_mapping_page(request: Request):
+    key_id, redirect = _require_login_key_id(request)
+    if redirect is not None:
+        return redirect
+    draft, _ = _setup_service().load(key_id)
+    if not draft.source.get("index"):
+        return RedirectResponse("/admin/ui/setup/source", status_code=303)
+    if not draft.mapping and draft.available_fields:
+        draft.mapping = propose_mapping(draft.available_fields)
+        _setup_service().save(key_id, draft, "mapping")
+    return _render_wizard(request, "setup/mapping.html", draft=draft, current_step="mapping")
+
+
+_PUBLIC_MAPPING_FIELDS: tuple[str, ...] = ("id", "type", "title", "description", "creators")
+
+
+@router.post("/ui/setup/mapping", response_class=HTMLResponse)
+async def setup_mapping_submit(request: Request):
+    key_id, redirect = _require_login_key_id(request)
+    if redirect is not None:
+        return redirect
+    csrf_error = await _enforce_csrf(request)
+    if csrf_error is not None:
+        return csrf_error
+
+    data = await _form(request)
+    svc = _setup_service()
+    draft, _ = svc.load(key_id)
+    if not draft.source.get("index"):
+        return RedirectResponse("/admin/ui/setup/source", status_code=303)
+
+    new_mapping: dict[str, dict[str, object]] = {}
+    for public in _PUBLIC_MAPPING_FIELDS:
+        source = (data.get(f"source__{public}") or "").strip()
+        mode = (data.get(f"mode__{public}") or "direct").strip() or "direct"
+        if not source:
+            continue
+        rule: dict[str, object] = {
+            "source": source,
+            "mode": mode,
+            "criticality": "required" if public in {"id", "type"} else "optional",
+        }
+        if mode == "split_list":
+            rule["separator"] = ";"
+        new_mapping[public] = rule
+
+    if not new_mapping.get("id") or not new_mapping.get("type"):
+        draft.mapping = new_mapping
+        svc.save(key_id, draft, "mapping")
+        return _render_wizard(
+            request,
+            "setup/mapping.html",
+            draft=draft,
+            current_step="mapping",
+            error="The 'id' and 'type' fields are required — pick a backend field for each.",
+            status_code=400,
+        )
+
+    draft.mapping = new_mapping
+    svc.save(key_id, draft, "mapping")
+    return _render_wizard(
+        request,
+        "setup/mapping.html",
+        draft=draft,
+        current_step="mapping",
+        message=(
+            "Mapping saved. Screens 4-7 (security profile, exposure, keys, "
+            "test) arrive in Sprint 15."
+        ),
+    )

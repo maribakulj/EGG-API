@@ -1,0 +1,70 @@
+{% extends "setup/_layout.html" %}
+{% block wizard %}
+<div class="panel">
+  <h3>Step 3 — Map your fields to the public record shape</h3>
+  <p class="help">
+    EGG-API exposes every record in a normalized shape
+    (<code class="muted">id</code>, <code class="muted">type</code>,
+    <code class="muted">title</code>, <code class="muted">description</code>,
+    <code class="muted">creators</code>). Tell it which backend field
+    corresponds to each — a default guess is filled in when a name matches.
+  </p>
+
+  {% if not draft.available_fields %}
+    <p class="error">
+      No fields were discovered on the backend yet. Go back to the source
+      step and click <em>Scan the backend</em>.
+    </p>
+    <a href="/admin/ui/setup/source"><button type="button" class="secondary">Back to source</button></a>
+  {% else %}
+    <form class="stack" method="post" action="/admin/ui/setup/mapping">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+
+      {% set public_fields = ['id', 'type', 'title', 'description', 'creators'] %}
+      {% for public in public_fields %}
+        {% set rule = draft.mapping.get(public) or {} %}
+        <div class="field-row">
+          <div>
+            <strong>{{ public }}</strong>
+            <div><small>
+              {% if public in ('id', 'type') %}Required — every record must have this.
+              {% else %}Recommended — leave blank if your records do not have an equivalent.
+              {% endif %}
+            </small></div>
+          </div>
+          <label>
+            Backend field
+            <select name="source__{{ public }}">
+              <option value="">(none)</option>
+              {% for field_name, field_type in draft.available_fields.items() %}
+                <option value="{{ field_name }}" {% if rule.get('source') == field_name %}selected{% endif %}>{{ field_name }} <small>({{ field_type }})</small></option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
+            Mode
+            <select name="mode__{{ public }}">
+              {% set modes = ['direct', 'split_list', 'first_non_empty', 'constant', 'template', 'boolean_cast', 'date_parser', 'url_passthrough', 'nested_object'] %}
+              {% for m in modes %}
+                <option value="{{ m }}" {% if rule.get('mode', 'direct') == m %}selected{% endif %}>{{ m }}</option>
+              {% endfor %}
+            </select>
+          </label>
+        </div>
+      {% endfor %}
+
+      <div class="actions">
+        <button type="submit" name="action" value="next">Save mapping</button>
+        <a href="/admin/ui/setup/source"><button type="button" class="secondary">Back</button></a>
+      </div>
+    </form>
+
+    <p class="help" style="margin-top:1rem">
+      <strong>Coming next (Sprint 15):</strong> security profile, exposure,
+      first public key, and a live test. For now this step is the last one
+      the wizard can save; the draft is kept in place until you either
+      publish it later or discard it.
+    </p>
+  {% endif %}
+</div>
+{% endblock %}

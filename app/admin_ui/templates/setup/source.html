@@ -1,0 +1,39 @@
+{% extends "setup/_layout.html" %}
+{% block wizard %}
+<div class="panel">
+  <h3>Step 2 — Pick the source</h3>
+  <p class="help">
+    An index or collection is the pool of records EGG-API will expose.
+    Click "Scan the backend" to list what's available on the server you
+    connected to. If nothing is listed, make sure your credentials have
+    read access.
+  </p>
+
+  <form class="stack" method="post" action="/admin/ui/setup/source">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+
+    <label>
+      Index name
+      <input name="index" value="{{ draft.source.index }}" required placeholder="records" />
+      <p class="help">You can type it manually or pick from the list below.</p>
+    </label>
+
+    {% if draft.available_indices %}
+    <div>
+      <strong>Indices reported by the backend:</strong>
+      <ul>
+        {% for idx in draft.available_indices %}
+          <li><code class="muted">{{ idx }}</code></li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+
+    <div class="actions">
+      <button type="submit" name="action" value="scan">Scan the backend</button>
+      <button type="submit" name="action" value="next">Save &amp; next</button>
+      <a href="/admin/ui/setup/backend"><button type="button" class="secondary">Back</button></a>
+    </div>
+  </form>
+</div>
+{% endblock %}

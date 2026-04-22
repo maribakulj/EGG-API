@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Sprint 14 — setup wizard, screens 1-3** (SPECS §26): new admin UI
+  flow under `/admin/ui/setup` that walks operators through *backend →
+  source → mapping*. State lives in a per-admin `setup_drafts` row
+  (migration 6), not in `egg.yaml`, so an operator can resume after a
+  disconnect; the final publish step arrives in Sprint 15. The backend
+  step can probe the candidate server without touching the running
+  container; the source step runs `scan_fields` and lists discovered
+  indices/fields; the mapping step pre-fills a heuristic proposal from
+  the discovered fields.
 - **Sprint 13 — REST CRUD for API keys** (SPECS §13.7-13.10):
   `GET/POST/PATCH/DELETE /admin/v1/keys` + `GET/PATCH/DELETE
   /admin/v1/keys/{key_id}`. The raw secret is disclosed exactly once

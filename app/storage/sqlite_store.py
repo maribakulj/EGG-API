@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import hmac
+import json
 import os
 import secrets
 import sqlite3
@@ -307,6 +308,46 @@ class SQLiteStore:
                 (now_iso,),
             )
         return int(cur.rowcount or 0)
+
+    # -- Setup wizard drafts (Sprint 14) -------------------------------------
+    def load_setup_draft(self, key_id: str) -> tuple[dict[str, object], str] | None:
+        """Return ``(payload, step)`` for ``key_id`` or ``None`` if absent."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT payload, step FROM setup_drafts WHERE key_id = ?",
+                (key_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        try:
+            data = json.loads(row["payload"])
+        except (ValueError, TypeError):
+            # Corrupt row: treat as absent; the caller will rebuild.
+            return None
+        if not isinstance(data, dict):
+            return None
+        return data, str(row["step"])
+
+    def save_setup_draft(self, key_id: str, payload: dict[str, object], step: str) -> None:
+        """Upsert a wizard draft for ``key_id``."""
+        now_iso = datetime.now(timezone.utc).isoformat()
+        serialized = json.dumps(payload, sort_keys=True)
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO setup_drafts(key_id, payload, step, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(key_id) DO UPDATE SET
+                    payload = excluded.payload,
+                    step = excluded.step,
+                    updated_at = excluded.updated_at
+                """,
+                (key_id, serialized, step, now_iso),
+            )
+
+    def delete_setup_draft(self, key_id: str) -> None:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM setup_drafts WHERE key_id = ?", (key_id,))
 
     def purge_usage_events_older_than(self, retention_days: int) -> int:
         """Delete usage_events rows whose ISO timestamp predates the cutoff.

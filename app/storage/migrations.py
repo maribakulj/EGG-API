@@ -122,6 +122,27 @@ def _m005_api_keys_hash_variant(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE api_keys ADD COLUMN hash_variant TEXT NOT NULL DEFAULT 'sha256'")
 
 
+def _m006_setup_drafts(conn: sqlite3.Connection) -> None:
+    """Sprint 14: per-admin setup wizard draft storage.
+
+    One row per ``key_id`` (the public admin label). The wizard persists
+    its state here so an operator can step out of the flow and resume
+    later, and so a brief screen refresh does not wipe progress. The
+    draft is NOT a config: nothing here reaches ``egg.yaml`` until the
+    final step calls ``container.reload()``.
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS setup_drafts (
+            key_id TEXT PRIMARY KEY,
+            payload TEXT NOT NULL,
+            step TEXT NOT NULL DEFAULT 'backend',
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(1, "baseline", _m001_baseline),
     Migration(2, "ui_sessions_expires_at", _m002_ui_sessions_expires_at),
@@ -132,6 +153,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(3, "ui_sessions_wipe_pre_hash", _m003_ui_sessions_wipe_pre_hash),
     Migration(4, "retire_quota_counters", _m004_retire_quota_counters),
     Migration(5, "api_keys_hash_variant", _m005_api_keys_hash_variant),
+    Migration(6, "setup_drafts", _m006_setup_drafts),
 )
 
 
@@ -167,6 +189,7 @@ def _baseline_pre_existing_db(conn: sqlite3.Connection, applied: set[int]) -> se
       - If `ui_sessions.expires_at` column exists, baseline 2 is applied.
       - If `quota_counters` does not exist, 4 is applied.
       - If `api_keys.hash_variant` column exists, 5 is applied.
+      - If `setup_drafts` exists, 6 is applied.
     """
     if applied:
         return applied
@@ -190,6 +213,8 @@ def _baseline_pre_existing_db(conn: sqlite3.Connection, applied: set[int]) -> se
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(api_keys)").fetchall()}
         if "hash_variant" in cols:
             baselined.add(5)
+    if _has_table("setup_drafts"):
+        baselined.add(6)
 
     if baselined:
         now = datetime.now(timezone.utc).isoformat()
