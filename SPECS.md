@@ -101,11 +101,17 @@ Le système doit :
 
 ## 6. Périmètre V1
 
+> **Note sur la v1.0.0 livrée** — la V1 décrite ici a été livrée à
+> l'exception de l'adapter **Solr** et de l'**installateur graphique
+> séquentiel** (§26), tous deux reportés. L'état courant est consigné
+> dans `CHANGELOG.md` et `app/TODO.md`. Solr reste au périmètre cible,
+> les endpoints ES/OpenSearch sont déjà en production.
+
 ### 6.1 Inclus
 
 - Support Elasticsearch
 - Support OpenSearch
-- Support Solr
+- Support Solr *(reporté post-v1.0.0 ; tracké dans `app/TODO.md`)*
 - API publique REST JSON
 - Documentation OpenAPI auto-générée
 - Console d’administration simplifiée
@@ -1220,13 +1226,16 @@ Détection par :
 - endpoint cluster health
 - structure de version OpenSearch
 
-### 25.3 Solr
+### 25.3 Solr *(reporté post-v1.0.0)*
 
 Détection par :
 
 - endpoint système Solr
 - API collections
 - API v2
+
+> Statut v1.0.0 : aucun adapter Solr n'est livré. Les règles de détection
+> ci-dessus sont conservées comme cahier des charges pour l'ajout futur.
 
 ### 25.4 Règles
 
@@ -1461,7 +1470,7 @@ La spécification OpenAPI doit inclure :
 ### 35.1 Installation
 
 - un administrateur peut connecter un backend supporté ;
-- le système détecte correctement Elastic / OpenSearch / Solr dans un cas standard ;
+- le système détecte correctement Elastic / OpenSearch (et, une fois livré, Solr) dans un cas standard ;
 - une configuration valide peut être créée sans édition manuelle de fichier.
 
 ### 35.2 Recherche
@@ -1505,7 +1514,7 @@ La spécification OpenAPI doit inclure :
 
 - backend Elastic simulé
 - backend OpenSearch simulé
-- backend Solr simulé
+- backend Solr simulé *(à livrer avec l'adapter Solr)*
 - recherche réelle sur petit dataset
 - facettes réelles
 - lecture record

@@ -22,16 +22,30 @@ EGG-API is the middle layer that makes this possible. It sits between the public
 
 You should **not** need to write Python, a query DSL, or a REST spec to deploy it. If you can edit a settings form, you can run EGG-API.
 
-### The long-term vision: a desktop app
+### Current delivery & desktop roadmap
 
-Today, EGG-API ships as a FastAPI service with a web-based admin UI at `/admin/*`. The **end goal** is to wrap the same runtime into a **desktop application** that a non-technical staff member can install on a workstation or a small server and configure entirely through standard, guided menus:
+**Today**, EGG-API ships as a FastAPI service with a web-based admin UI at
+`/admin/*`. Bringing it up still requires a terminal, Python 3.10+, and one
+YAML edit (or a sequence of admin-API calls). In other words: the current
+release is aimed at an operator, not at an archivist working alone.
 
-- point it at the existing backend (URL, index/collection, credentials);
-- let it introspect the backend fields and propose a default mapping;
-- pick a security profile (prudent / standard / custom);
-- click **Publish** and get a secured, documented public API on top of the institution's data.
+**The roadmap** toward the original product promise is explicit and tracked:
 
-No terminal, no YAML hand-editing, no DevOps rotation. Install, configure, expose — safely.
+1. A guided **Admin UI setup wizard** (SPECS §26, 7 screens) covering
+   backend connection, source selection, field mapping, security profile,
+   exposure, keys and a live test — so configuration stops requiring YAML.
+2. A **desktop package** (`.msi` / `.pkg` / `.AppImage`) built with
+   Briefcase + `pywebview`, launching the same FastAPI runtime in a native
+   window on localhost.
+3. A **first-run UX** (`egg-api start`) that generates the admin key,
+   opens the wizard in the default browser via a one-time token, and
+   persists runtime data under the OS-native user directory.
+
+Until those land, the honest description of EGG-API is: a hardened,
+well-tested façade for GLAM backends that still expects a Python-literate
+operator for the initial install. The rest of this README describes that
+reality. Progress toward the desktop story is tracked in
+[CHANGELOG.md](./CHANGELOG.md) and the SPECS.
 
 ---
 
@@ -74,7 +88,7 @@ No terminal, no YAML hand-editing, no DevOps rotation. Install, configure, expos
 | **Admin API** | Config CRUD, validation, test-query + `/admin/v1/debug/translate` (DSL preview), paginated `/admin/v1/usage`, `/admin/v1/storage/stats` |
 | **Observability** | Prometheus `/metrics` (auth-gated in prod), structured JSON logs with `request_id` / `key_id` / `trace_id` / `span_id` / `latency_ms`; opt-in OpenTelemetry via `EGG_OTEL_ENDPOINT` |
 | **Storage** | SQLite state DB with hot-path indexes; versioned migrations (`egg-api migrate`); background retention purge |
-| **Backends** | Elasticsearch (7+) or OpenSearch (1+) via `backend.type`; `BackendAdapter` Protocol for adding new backends (see `docs/backends.md`) |
+| **Backends** | Elasticsearch (7+) or OpenSearch (1+) via `backend.type`; `BackendAdapter` Protocol for adding new backends (see `docs/backends.md`). Solr is planned (`app/TODO.md`). |
 
 ---
 
@@ -168,7 +182,7 @@ The first `egg-api init` on a fresh machine will either honour `EGG_BOOTSTRAP_AD
 | `egg-api check-backend` | Probe the configured backend for reachability |
 | `egg-api print-paths` | Show effective config / state-db / bootstrap-key paths |
 
-Equivalent `make` targets (`make setup`, `make init`, `make run`, `make check-config`, `make check-backend`, `make print-paths`, `make test`) are provided for convenience.
+Equivalent `make` targets (`make setup`, `make init`, `make dev` for the auto-reload loop, `make run` for a production-style local start, `make check-config`, `make check-backend`, `make print-paths`, `make test`) are provided for convenience.
 
 ---
 
@@ -305,9 +319,12 @@ All responses are JSON. Errors follow SPECS §19:
 | `GET /v1/facets` | Facet counts only (aggregations via `size=0`) |
 | `GET /v1/collections` | Collections the service exposes |
 | `GET /v1/schema` | Active public schema + allowlists |
-| `GET /v1/suggest` | **501** (declared for SPECS §12.2; implementation pending) |
-| `GET /v1/manifest/{id}` | **501** (declared for SPECS §12.3; implementation pending) |
+| `GET /v1/suggest` | Autocomplete over a title-like field (SPECS §12.2) |
 | `GET /v1/openapi.json` | OpenAPI 3 schema |
+
+> **Note** — `GET /v1/manifest/{id}` (SPECS §12.3) was retired in v1.0.0:
+> IIIF manifests should be surfaced through a mapped field on the record
+> (e.g. `links.iiif_manifest`) rather than proxied. The route returns `404`.
 
 ### Example — search
 
@@ -482,26 +499,28 @@ EGG-API/
 
 ### V1 (shipped)
 
-- Elasticsearch adapter, read-only.
-- Public `/v1/*` with query-policy enforcement.
+- Elasticsearch **and OpenSearch** adapters, read-only.
+- Public `/v1/*` with query-policy enforcement, including `/v1/suggest`.
 - Admin `/admin/v1/*` and operator UI under `/admin/*`.
 - YAML configuration with cross-field validation.
 - SQLite state (keys, sessions, quotas, usage) with hot-path indexes.
 - Security hardening (see [Security model](#security-model)).
-- Prometheus metrics + structured JSON logs.
-- HTTP response caching with ETag / 304.
+- Prometheus metrics + structured JSON logs + opt-in OpenTelemetry.
+- HTTP response caching with ETag / 304; JSON-LD and CSV output flavours.
+- Rate limiting (in-memory by default, Redis opt-in).
 
-### Declared but not implemented
+### Retired in v1.0.0
 
-- `/v1/suggest` — autocomplete (SPECS §12.2).
-- `/v1/manifest/{id}` — IIIF passthrough/redirect (SPECS §12.3).
+- `GET /v1/manifest/{id}` — superseded by mapping IIIF links as a record field.
+  See CHANGELOG.
 
 ### Out of scope for V1
 
-- OpenSearch and Solr adapters.
+- Solr adapter (planned, tracked in `app/TODO.md`).
 - Multi-tenant isolation.
 - Deep-pagination workarounds (`search_after` / PIT).
 - Native MCP server (SPECS explicitly lists this as future work).
+- Bundled desktop installer (see [Current delivery & desktop roadmap](#current-delivery--desktop-roadmap)).
 
 Follow-ups for these are tracked in [CHANGELOG.md](./CHANGELOG.md) and the SPECS.
 

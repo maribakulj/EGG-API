@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import stat
 from pathlib import Path
 
 import yaml
@@ -57,6 +59,12 @@ class ConfigManager:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         data = self._redact(config.model_dump(mode="python"))
         self.path.write_text(yaml.safe_dump(data, sort_keys=False))
+        # The config file may contain sensitive values (backend URL with
+        # embedded credentials, API-key pepper references, CORS allowlists
+        # revealing partner origins). Restrict it to the owner on POSIX;
+        # the chmod is a no-op on Windows, which is acceptable.
+        with contextlib.suppress(OSError):
+            self.path.chmod(stat.S_IRUSR | stat.S_IWUSR)
 
     def validate_data(self, data: dict[str, object]) -> tuple[bool, str | None]:
         try:
