@@ -7,7 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(Nothing yet.)
+### Added
+
+- **Backend auto-discovery in the setup wizard**: step 1 now has a
+  *Detect a backend on this machine* button. It probes a short
+  allowlist of well-known hosts in parallel (loopback 9200/9201 +
+  common docker-compose hostnames) and surfaces each candidate with
+  a *Use this URL* shortcut that patches the draft without the
+  operator typing anything. Reachable backends are tagged ES or
+  OpenSearch with their version; those that answer 401 are flagged
+  *needs auth* so the operator still sees the URL. No credentials
+  are ever sent on discovery. Operators can extend the allowlist via
+  `EGG_DISCOVERY_HOSTS=host[:port],host[:port]` (useful for
+  `es-staging.internal:9200` inside corporate networks).
 
 ## [2.0.0] — 2026-04-22
 

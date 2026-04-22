@@ -33,6 +33,7 @@ from app.admin_ui.setup_service import (
     SetupDraft,
     SetupDraftService,
     build_probe_adapter,
+    discover_backend_candidates,
     draft_to_config,
     extract_index_choices,
     propose_mapping,
@@ -619,6 +620,70 @@ def setup_backend_page(request: Request):
         return redirect
     draft, _ = _setup_service().load(key_id)
     return _render_wizard(request, "setup/backend.html", draft=draft, current_step="backend")
+
+
+@router.post("/ui/setup/discover", response_class=HTMLResponse)
+async def setup_discover(request: Request):
+    """Probe the well-known backend endpoints and re-render step 1.
+
+    The operator does not have to fill anything in first; clicking the
+    "Detect a backend" button triggers a parallel probe of localhost +
+    the conventional docker-compose hostnames. Reachable candidates
+    come back with an "Use this URL" button that pre-fills the form.
+    """
+    key_id, redirect = _require_login_key_id(request)
+    if redirect is not None:
+        return redirect
+    csrf_error = await _enforce_csrf(request)
+    if csrf_error is not None:
+        return csrf_error
+
+    draft, _ = _setup_service().load(key_id)
+    candidates = discover_backend_candidates()
+    ok_count = sum(1 for c in candidates if c.status == "ok")
+    message = (
+        f"Found {ok_count} reachable backend(s)."
+        if ok_count
+        else "No backend answered. Type the URL manually below."
+    )
+    return _render_wizard(
+        request,
+        "setup/backend.html",
+        draft=draft,
+        current_step="backend",
+        message=message,
+        discovery_candidates=candidates,
+    )
+
+
+@router.post("/ui/setup/discover/use", response_class=HTMLResponse)
+async def setup_discover_use(request: Request):
+    """Adopt one of the discovered URLs into the draft and save.
+
+    The operator clicks "Use this URL" on a candidate; we patch only
+    the backend type + URL into the draft (auth stays untouched) so
+    they can jump straight to the "Test connection" / "Save & next"
+    buttons with a sensible form pre-filled.
+    """
+    key_id, redirect = _require_login_key_id(request)
+    if redirect is not None:
+        return redirect
+    csrf_error = await _enforce_csrf(request)
+    if csrf_error is not None:
+        return csrf_error
+
+    data = await _form(request)
+    chosen_url = (data.get("url") or "").strip()
+    chosen_type = (data.get("backend_type") or "elasticsearch").strip() or "elasticsearch"
+    if chosen_type not in {"elasticsearch", "opensearch"} or not chosen_url:
+        return RedirectResponse("/admin/ui/setup/backend", status_code=303)
+
+    svc = _setup_service()
+    draft, _ = svc.load(key_id)
+    draft.backend["type"] = chosen_type
+    draft.backend["url"] = chosen_url
+    svc.save(key_id, draft, "backend")
+    return RedirectResponse("/admin/ui/setup/backend", status_code=303)
 
 
 @router.post("/ui/setup/backend", response_class=HTMLResponse)

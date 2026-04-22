@@ -401,7 +401,11 @@ Same-origin console at `/admin/*`, served by Jinja2 templates (autoescape enforc
 - `/admin/ui` — dashboard (service + backend health, usage summary).
 - `/admin/ui/setup` — **setup wizard** (8 steps, SPECS §26): a guided
   flow covering backend → source → mapping → security → exposure →
-  first public key → live test → review & publish. Nothing reaches
+  first public key → live test → review & publish. Step 1 includes a
+  *Detect a backend on this machine* button that probes loopback +
+  common docker-compose hostnames in parallel so the operator rarely
+  has to type a URL. Extend the allowlist via `EGG_DISCOVERY_HOSTS`
+  when ES lives on a known internal hostname. Nothing reaches
   `config/egg.yaml` until the operator clicks *Publish*; drafts are
   per-admin and survive disconnects.
 - `/admin/ui/help` — glossary of the technical terms used across the

@@ -23,6 +23,8 @@
     "/admin/ui/mapping",
     "/admin/ui/setup",
     "/admin/ui/setup/backend",
+    "/admin/ui/setup/discover",
+    "/admin/ui/setup/discover/use",
     "/admin/ui/setup/done",
     "/admin/ui/setup/exposure",
     "/admin/ui/setup/keys",

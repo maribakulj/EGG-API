@@ -8,6 +8,47 @@
     read-only mode.
   </p>
 
+  <form method="post" action="/admin/ui/setup/discover" class="inline-form" style="margin-bottom:1rem">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <button type="submit">Detect a backend on this machine</button>
+    <small>Tries localhost and the common docker-compose hostnames. No credentials are sent.</small>
+  </form>
+
+  {% if discovery_candidates %}
+  <div class="panel" style="background:#fff">
+    <h4>Discovery results</h4>
+    <table>
+      <thead><tr><th>URL</th><th>Detected</th><th>Status</th><th>Action</th></tr></thead>
+      <tbody>
+      {% for candidate in discovery_candidates %}
+        <tr>
+          <td><code class="muted">{{ candidate.url }}</code></td>
+          <td>
+            {% if candidate.backend_type %}{{ candidate.backend_type }}{% if candidate.version %} {{ candidate.version }}{% endif %}{% else %}—{% endif %}
+          </td>
+          <td>
+            {% if candidate.status == 'ok' %}<span class="success" style="padding:0.1rem 0.4rem">reachable</span>
+            {% elif candidate.status == 'needs_auth' %}<span class="secret-box" style="padding:0.1rem 0.4rem">needs auth</span>
+            {% elif candidate.status == 'unsupported_version' %}<span class="error" style="padding:0.1rem 0.4rem">too old</span>
+            {% else %}<small>{{ candidate.message or 'not reachable' }}</small>{% endif %}
+          </td>
+          <td>
+            {% if candidate.status in ('ok', 'needs_auth') %}
+            <form method="post" action="/admin/ui/setup/discover/use" class="inline-form">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+              <input type="hidden" name="url" value="{{ candidate.url }}" />
+              <input type="hidden" name="backend_type" value="{{ candidate.backend_type or 'elasticsearch' }}" />
+              <button type="submit">Use this URL</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
   <form class="stack" method="post" action="/admin/ui/setup/backend">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
     <label>

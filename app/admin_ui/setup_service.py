@@ -15,8 +15,13 @@ Keeping the service thin on purpose:
 
 from __future__ import annotations
 
+import concurrent.futures
+import os
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlparse
+
+import httpx
 
 from app.adapters.base import BackendAdapter
 from app.adapters.elasticsearch.adapter import ElasticsearchAdapter
@@ -411,3 +416,228 @@ def propose_mapping(available_fields: dict[str, str]) -> dict[str, dict[str, Any
             rule["separator"] = ";"
         proposal[public_name] = rule
     return proposal
+
+
+# ---------------------------------------------------------------------------
+# Backend auto-discovery.
+#
+# The wizard's first screen asks the operator to paste a backend URL.
+# That's fine for IT-literate ops, but a librarian installing the
+# desktop bundle typically has *one* Elasticsearch (or OpenSearch)
+# running somewhere obvious — localhost, a docker-compose hostname —
+# and has never had to type its URL. ``discover_backend_candidates``
+# probes a short allowlist of well-known hosts in parallel and
+# surfaces the ones that answer.
+#
+# Security posture:
+#   - The allowlist is restricted to loopback + conventional
+#     docker-compose hostnames; no arbitrary host/port scan. Operators
+#     can extend it via EGG_DISCOVERY_HOSTS (comma-separated
+#     "host[:port]" entries).
+#   - Probes never send credentials. A protected backend therefore
+#     answers with 401, which we report as "found but needs auth" so
+#     the operator knows it's there without leaking anything.
+#   - Overall deadline bounded by ``timeout_seconds`` * number of
+#     candidates, capped to ~5 s total wall-clock via the thread
+#     pool.
+# ---------------------------------------------------------------------------
+
+
+# Conventional hosts we probe by default. Adjust sparingly: adding a
+# new entry here means *every* wizard user scans that host on every
+# discovery click. Docker-compose nicknames ("elasticsearch", "opensearch")
+# resolve only inside the compose network, so on a bare Mac they simply
+# fail fast with a DNS error.
+_DEFAULT_DISCOVERY_HOSTS: tuple[tuple[str, int], ...] = (
+    ("localhost", 9200),
+    ("127.0.0.1", 9200),
+    ("localhost", 9201),
+    ("elasticsearch", 9200),
+    ("opensearch", 9200),
+    ("opensearch-node1", 9200),
+)
+
+
+@dataclass(frozen=True)
+class DiscoveryCandidate:
+    """One probe result reported to the wizard UI."""
+
+    url: str
+    backend_type: str | None  # "elasticsearch", "opensearch", or None if unknown
+    version: str | None
+    status: str  # "ok", "needs_auth", "unsupported_version", "unreachable"
+    message: str | None = None
+
+
+def _env_discovery_hosts() -> list[tuple[str, int]]:
+    raw = os.getenv("EGG_DISCOVERY_HOSTS", "").strip()
+    if not raw:
+        return []
+    out: list[tuple[str, int]] = []
+    for entry in raw.split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        host, _, port = entry.partition(":")
+        host = host.strip()
+        if not host:
+            continue
+        try:
+            parsed_port = int(port) if port else 9200
+        except ValueError:
+            continue
+        out.append((host, parsed_port))
+    return out
+
+
+def _candidate_urls() -> list[str]:
+    seen: set[str] = set()
+    urls: list[str] = []
+    for host, port in (*_DEFAULT_DISCOVERY_HOSTS, *_env_discovery_hosts()):
+        url = f"http://{host}:{port}"
+        if url not in seen:
+            seen.add(url)
+            urls.append(url)
+    return urls
+
+
+def _interpret_probe(url: str, resp: httpx.Response) -> DiscoveryCandidate:
+    """Map an HTTP response from ``GET <backend>/`` to a candidate row."""
+    status = resp.status_code
+    if status in {401, 403}:
+        return DiscoveryCandidate(
+            url=url,
+            backend_type=None,
+            version=None,
+            status="needs_auth",
+            message=(
+                "Backend responded but requires authentication. Use this URL and "
+                "fill in the credentials on the next step."
+            ),
+        )
+    if status != 200:
+        return DiscoveryCandidate(
+            url=url,
+            backend_type=None,
+            version=None,
+            status="unreachable",
+            message=f"Unexpected status {status}.",
+        )
+    try:
+        body = resp.json() or {}
+    except Exception:
+        return DiscoveryCandidate(
+            url=url,
+            backend_type=None,
+            version=None,
+            status="unreachable",
+            message="Response was not JSON — this is probably not a search backend.",
+        )
+    version_info = body.get("version", {}) if isinstance(body, dict) else {}
+    version_number = str(version_info.get("number") or "") or None
+    distribution = str(version_info.get("distribution") or "").strip().lower()
+    tagline = str(body.get("tagline") or "").strip().lower()
+
+    if distribution == "opensearch":
+        btype: str | None = "opensearch"
+    elif "elasticsearch" in tagline or "you know, for search" in tagline:
+        btype = "elasticsearch"
+    else:
+        btype = None
+
+    # Minimum-version gate mirrors the adapters' own check: ES ≥ 7, OS ≥ 1.
+    if version_number:
+        try:
+            major = int(version_number.split(".", 1)[0])
+        except ValueError:
+            major = 0
+        if btype == "elasticsearch" and major < 7:
+            return DiscoveryCandidate(
+                url=url,
+                backend_type=btype,
+                version=version_number,
+                status="unsupported_version",
+                message=f"Elasticsearch {version_number} is too old (need 7+).",
+            )
+        if btype == "opensearch" and major < 1:
+            return DiscoveryCandidate(
+                url=url,
+                backend_type=btype,
+                version=version_number,
+                status="unsupported_version",
+                message=f"OpenSearch {version_number} is too old (need 1+).",
+            )
+
+    if btype is None:
+        return DiscoveryCandidate(
+            url=url,
+            backend_type=None,
+            version=version_number,
+            status="unreachable",
+            message=("Something answered but did not identify as Elasticsearch/OpenSearch."),
+        )
+    return DiscoveryCandidate(url=url, backend_type=btype, version=version_number, status="ok")
+
+
+def _probe_one(
+    url: str, *, timeout_seconds: float, client: httpx.Client | None
+) -> DiscoveryCandidate:
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        return DiscoveryCandidate(
+            url=url,
+            backend_type=None,
+            version=None,
+            status="unreachable",
+            message="Unsupported URL scheme",
+        )
+    close_after = False
+    if client is None:
+        client = httpx.Client(timeout=timeout_seconds, follow_redirects=False)
+        close_after = True
+    try:
+        resp = client.get(url)
+    except Exception as exc:
+        logger.info("discovery_probe_failed_soft", url=url, error=str(exc))
+        return DiscoveryCandidate(
+            url=url,
+            backend_type=None,
+            version=None,
+            status="unreachable",
+            message=str(exc),
+        )
+    finally:
+        if close_after:
+            client.close()
+    return _interpret_probe(url, resp)
+
+
+def discover_backend_candidates(
+    *,
+    urls: list[str] | None = None,
+    timeout_seconds: float = 1.5,
+    max_workers: int = 6,
+    client: httpx.Client | None = None,
+) -> list[DiscoveryCandidate]:
+    """Probe the allowlist in parallel and return every candidate.
+
+    The return order is the probe order so templates can render
+    "localhost first, docker-compose last". Reachable backends come
+    with a ``status`` of ``ok`` / ``needs_auth`` / ``unsupported_version``;
+    the wizard surfaces those with an "Use this" button. Unreachable
+    entries are kept so the UI can explain why a well-known host did
+    not answer.
+    """
+    probe_urls = urls if urls is not None else _candidate_urls()
+    if not probe_urls:
+        return []
+    results: list[DiscoveryCandidate | None] = [None] * len(probe_urls)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {
+            pool.submit(_probe_one, url, timeout_seconds=timeout_seconds, client=client): idx
+            for idx, url in enumerate(probe_urls)
+        }
+        for fut in concurrent.futures.as_completed(futures):
+            idx = futures[fut]
+            results[idx] = fut.result()
+    return [r for r in results if r is not None]
