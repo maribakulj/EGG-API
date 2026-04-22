@@ -497,6 +497,162 @@ def usage_page(request: Request):
 
 
 # ---------------------------------------------------------------------------
+# Data imports (Sprint 22)
+# ---------------------------------------------------------------------------
+
+
+def _render_imports(
+    request: Request,
+    *,
+    message: str | None = None,
+    error: str | None = None,
+    status_code: int = 200,
+) -> HTMLResponse:
+    sources = container.store.list_import_sources()
+    # Flatten the last 3 runs per source into one table so operators
+    # can eyeball overall health without clicking into each source.
+    recent_runs: list[dict[str, object]] = []
+    label_by_id = {src.id: src.label for src in sources}
+    for src in sources:
+        for run in container.store.list_import_runs(src.id, limit=3):
+            recent_runs.append(
+                {
+                    "source_label": label_by_id.get(run.source_id, f"#{run.source_id}"),
+                    "started_at": run.started_at,
+                    "ended_at": run.ended_at,
+                    "status": run.status,
+                    "records_ingested": run.records_ingested,
+                    "records_failed": run.records_failed,
+                    "error_message": run.error_message,
+                }
+            )
+    recent_runs.sort(key=lambda r: r["started_at"], reverse=True)
+    return _render(
+        "imports.html",
+        request,
+        status_code=status_code,
+        sources=sources,
+        recent_runs=recent_runs[:15],
+        message=message,
+        error=error,
+    )
+
+
+@router.get("/ui/imports", response_class=HTMLResponse)
+def imports_page(request: Request):
+    guard = _require_login(request)
+    if guard is not None:
+        return guard
+    return _render_imports(request)
+
+
+_ALLOWED_PROFILES = {"library", "museum", "archive"}
+_ALLOWED_PREFIXES = {"oai_dc", "lido", "marcxml"}
+
+
+@router.post("/ui/imports/add", response_class=HTMLResponse)
+async def imports_add(request: Request):
+    guard = _require_login(request)
+    if guard is not None:
+        return guard
+    csrf_error = await _enforce_csrf(request)
+    if csrf_error is not None:
+        return csrf_error
+
+    data = await _form(request)
+    label = (data.get("label") or "").strip()
+    url = (data.get("url") or "").strip()
+    metadata_prefix = (data.get("metadata_prefix") or "oai_dc").strip() or "oai_dc"
+    set_spec = (data.get("set_spec") or "").strip() or None
+    schema_profile = (data.get("schema_profile") or "library").strip()
+
+    if not label or not url:
+        return _render_imports(request, error="Label and URL are both required.", status_code=400)
+    if schema_profile not in _ALLOWED_PROFILES:
+        return _render_imports(request, error="Unknown schema profile.", status_code=400)
+    if metadata_prefix not in _ALLOWED_PREFIXES:
+        return _render_imports(request, error="Unsupported metadata prefix.", status_code=400)
+
+    container.store.add_import_source(
+        label=label,
+        kind="oaipmh",
+        url=url,
+        metadata_prefix=metadata_prefix,
+        set_spec=set_spec,
+        schema_profile=schema_profile,
+    )
+    return _render_imports(request, message=f"Added source: {label}")
+
+
+@router.post("/ui/imports/{source_id}/run", response_class=HTMLResponse)
+async def imports_run(request: Request, source_id: int):
+    from app.importers.oaipmh import ingest as oai_ingest
+
+    guard = _require_login(request)
+    if guard is not None:
+        return guard
+    csrf_error = await _enforce_csrf(request)
+    if csrf_error is not None:
+        return csrf_error
+
+    src = container.store.get_import_source(source_id)
+    if src is None or src.kind != "oaipmh" or not src.url:
+        return _render_imports(request, error="Unknown or unsupported source.", status_code=404)
+
+    run_id = container.store.start_import_run(source_id)
+    try:
+        result = oai_ingest(
+            url=src.url,
+            metadata_prefix=src.metadata_prefix or "oai_dc",
+            set_spec=src.set_spec,
+            bulk_index=container.adapter.bulk_index,
+        )
+    except Exception as exc:
+        container.store.finish_import_run(
+            run_id,
+            status="failed",
+            records_ingested=0,
+            records_failed=0,
+            error_message=str(exc),
+        )
+        return _render_imports(request, error=f"Import failed: {exc}", status_code=500)
+
+    status = "failed" if result.error else "succeeded"
+    container.store.finish_import_run(
+        run_id,
+        status=status,
+        records_ingested=result.ingested,
+        records_failed=result.failed,
+        error_message=result.error,
+    )
+    if result.error:
+        return _render_imports(
+            request,
+            error=f"Import finished with errors: {result.error}",
+            status_code=200,
+        )
+    return _render_imports(
+        request,
+        message=(
+            f"Imported {result.ingested} record(s) from {src.label} ({result.failed} failure(s))."
+        ),
+    )
+
+
+@router.post("/ui/imports/{source_id}/delete", response_class=HTMLResponse)
+async def imports_delete(request: Request, source_id: int):
+    guard = _require_login(request)
+    if guard is not None:
+        return guard
+    csrf_error = await _enforce_csrf(request)
+    if csrf_error is not None:
+        return csrf_error
+    if not container.store.delete_import_source(source_id):
+        return _render_imports(request, error="Unknown source.", status_code=404)
+    return _render_imports(request, message="Source removed.")
+
+
+# ---------------------------------------------------------------------------
 # Setup wizard (Sprint 14 — screens 1-4)
 #
 # Per SPECS §26 the wizard is the non-technical operator's first contact

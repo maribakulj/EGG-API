@@ -475,3 +475,57 @@ class ElasticsearchAdapter:
                 503,
             ) from exc
         return self.extract_facets(response.json())
+
+    def bulk_index(self, docs: list[dict[str, Any]]) -> tuple[int, int]:
+        """Index ``docs`` via the ES ``_bulk`` endpoint.
+
+        ``_bulk`` expects alternating action + source NDJSON lines.
+        A per-document failure reported in the response is counted in
+        ``failed`` without aborting the batch. An HTTP-level error on
+        the whole request surfaces as ``backend_unavailable``.
+        """
+        if not docs:
+            return 0, 0
+        lines: list[str] = []
+        for doc in docs:
+            doc_id = doc.get("id")
+            action: dict[str, Any] = {"index": {"_index": self.index}}
+            if doc_id:
+                action["index"]["_id"] = str(doc_id)
+            lines.append(json.dumps(action, separators=(",", ":")))
+            lines.append(json.dumps(doc, separators=(",", ":"), default=str))
+        body = "\n".join(lines) + "\n"
+        response = self._request(
+            "POST",
+            f"{self.base_url}/_bulk",
+            content=body.encode("utf-8"),
+            headers={**self._outgoing_headers(), "Content-Type": "application/x-ndjson"},
+        )
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise AppError(
+                "backend_unavailable",
+                "Bulk index failed",
+                {"reason": str(exc), "status_code": response.status_code},
+                503,
+            ) from exc
+        payload = response.json() if response.content else {}
+        items = payload.get("items", []) if isinstance(payload, dict) else []
+        ingested = 0
+        failed = 0
+        for item in items:
+            if not isinstance(item, dict):
+                failed += 1
+                continue
+            op = item.get("index") or item.get("create") or {}
+            status = int(op.get("status", 0))
+            if 200 <= status < 300:
+                ingested += 1
+            else:
+                failed += 1
+        # Fallback for adapters / fixtures that do not report per-item
+        # status: count every doc as ingested.
+        if not items:
+            ingested = len(docs)
+        return ingested, failed

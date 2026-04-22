@@ -184,6 +184,46 @@ def _m008_ui_sessions_last_activity(conn: sqlite3.Connection) -> None:
         )
 
 
+def _m009_import_sources_and_runs(conn: sqlite3.Connection) -> None:
+    """Sprint 22: persistent import sources + run history.
+
+    One row per configured upstream (OAI-PMH endpoint, LIDO file
+    drop, CSV profile, ...). Each run appends to ``import_runs`` so
+    the admin dashboard can show the last ingestion status + a
+    history for debugging. ``kind`` is the discriminator so future
+    importers (MARC, LIDO, CSV, EAD) can share the same tables.
+    """
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS import_sources (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            label TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            url TEXT,
+            metadata_prefix TEXT,
+            set_spec TEXT,
+            schema_profile TEXT NOT NULL DEFAULT 'library',
+            created_at TEXT NOT NULL,
+            last_run_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS import_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_id INTEGER NOT NULL,
+            started_at TEXT NOT NULL,
+            ended_at TEXT,
+            status TEXT NOT NULL,
+            records_ingested INTEGER NOT NULL DEFAULT 0,
+            records_failed INTEGER NOT NULL DEFAULT 0,
+            error_message TEXT,
+            FOREIGN KEY(source_id) REFERENCES import_sources(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_import_runs_source ON import_runs(source_id, started_at DESC);
+        """
+    )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(1, "baseline", _m001_baseline),
     Migration(2, "ui_sessions_expires_at", _m002_ui_sessions_expires_at),
@@ -197,6 +237,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(6, "setup_drafts", _m006_setup_drafts),
     Migration(7, "setup_otps", _m007_setup_otps),
     Migration(8, "ui_sessions_last_activity", _m008_ui_sessions_last_activity),
+    Migration(9, "import_sources_and_runs", _m009_import_sources_and_runs),
 )
 
 
@@ -235,6 +276,7 @@ def _baseline_pre_existing_db(conn: sqlite3.Connection, applied: set[int]) -> se
       - If `setup_drafts` exists, 6 is applied.
       - If `setup_otps` exists, 7 is applied.
       - If `ui_sessions.last_activity_at` column exists, 8 is applied.
+      - If `import_sources` exists, 9 is applied.
     """
     if applied:
         return applied
@@ -266,6 +308,8 @@ def _baseline_pre_existing_db(conn: sqlite3.Connection, applied: set[int]) -> se
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(ui_sessions)").fetchall()}
         if "last_activity_at" in cols:
             baselined.add(8)
+    if _has_table("import_sources"):
+        baselined.add(9)
 
     if baselined:
         now = datetime.now(timezone.utc).isoformat()

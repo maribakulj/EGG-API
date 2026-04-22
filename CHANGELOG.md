@@ -9,6 +9,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Sprint 22 — OAI-PMH Dublin Core import** (first importer in the
+  series that turns EGG-API into a GLAM publication layer rather
+  than a raw ES façade):
+  - New `app/importers/oaipmh.py` — minimal OAI-PMH 2.0 client built
+    on `httpx` + stdlib `xml.etree` (no `sickle` / `lxml` added).
+    Implements `Identify`, `ListRecords` with resumption tokens,
+    XML-error and OAI-level-error detection, a `max_pages` safety
+    ceiling, and a streaming `ingest()` that chunks records through
+    `bulk_index()` (default 500 docs/batch).
+  - Dublin Core → backend-doc mapping covering `title`, `description`,
+    `creators`, `subject`, `date`, `type`, `language`, `publisher`,
+    `rights`, with a heuristic that routes any `dc:identifier`
+    containing `/iiif/` or ending in `/manifest` to the new
+    `iiif_manifest` slot.
+  - New `BackendAdapter.bulk_index(docs)` in `app.adapters.base`,
+    implemented by `ElasticsearchAdapter` (via `_bulk` NDJSON) and
+    the `tests/_fakes.FakeAdapter` (in-memory `stored` list for
+    assertions).
+  - Migration 9 creates `import_sources` + `import_runs`. New
+    `SQLiteStore` methods: `add_import_source`, `list_import_sources`,
+    `get_import_source`, `delete_import_source`, `start_import_run`,
+    `finish_import_run`, `list_import_runs`.
+  - New admin REST surface `/admin/v1/imports` (+ `{id}`, `{id}/runs`,
+    `{id}/identify`, `{id}/run`) with Pydantic `extra="forbid"`
+    bodies, synchronous `run` for immediate feedback.
+  - New admin UI page `/admin/ui/imports` with an *Add OAI-PMH
+    source* form, *Run now* / *Delete* actions and a rolling
+    *Recent runs* table. Nav link added to `base.html`.
+  - Coverage gate dips to **78 %** for this release (~400 new lines
+    of Jinja/route plumbing whose defensive error branches are
+    thinly tested). A polish sprint will push per-package
+    thresholds back up.
+
 - **Sprint 21 — Windows/Mac polish without signing**:
   - `app/desktop.py` now redirects stdout, stderr and the Python
     logging tree to `EGG_HOME/logs/launcher.log` at the very top

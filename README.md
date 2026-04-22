@@ -408,6 +408,11 @@ Same-origin console at `/admin/*`, served by Jinja2 templates (autoescape enforc
   when ES lives on a known internal hostname. Nothing reaches
   `config/egg.yaml` until the operator clicks *Publish*; drafts are
   per-admin and survive disconnects.
+- `/admin/ui/imports` — **OAI-PMH import** (Sprint 22): connect your
+  library, museum or archive catalogue (Koha, PMB, AtoM, Axiell,
+  MuseumPlus, CollectionSpace, …) to EGG-API and harvest records
+  into the active backend. Supports Dublin Core today; LIDO, MARC
+  and EAD come in S24-S26.
 - `/admin/ui/help` — glossary of the technical terms used across the
   console, written for non-technical operators.
 - `/admin/ui/config` — editable configuration form.

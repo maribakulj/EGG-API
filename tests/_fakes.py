@@ -21,7 +21,13 @@ class FakeAdapter:
     tests (search / records / facets / suggest) can run without a real
     Elasticsearch backend. Kept intentionally simple — a single hit,
     one facet, one suggestion family.
+
+    ``bulk_index`` appends incoming documents to :attr:`stored` so
+    Sprint 22 importer tests can assert what the importer sent.
     """
+
+    def __init__(self) -> None:
+        self.stored: list[dict[str, Any]] = []
 
     def detect(self) -> dict[str, Any]:
         return {"detected": True, "version": {"number": "8.0.0"}}
@@ -70,6 +76,10 @@ class FakeAdapter:
         if not prefix:
             return []
         return [f"{prefix} result {i}" for i in range(min(limit, 3))]
+
+    def bulk_index(self, docs: list[dict[str, Any]]) -> tuple[int, int]:
+        self.stored.extend(dict(d) for d in docs)
+        return len(docs), 0
 
     @staticmethod
     def extract_facets(payload: dict[str, Any]) -> dict[str, dict[str, int]]:

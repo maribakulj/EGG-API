@@ -41,6 +41,31 @@ class UsageEvent:
     error_code: str | None
 
 
+@dataclass
+class ImportSource:
+    id: int
+    label: str
+    kind: str  # "oaipmh" / future: "lido_file", "marc", "csv", "ead"
+    url: str | None
+    metadata_prefix: str | None
+    set_spec: str | None
+    schema_profile: str  # "library" / "museum" / "archive"
+    created_at: str
+    last_run_at: str | None = None
+
+
+@dataclass
+class ImportRun:
+    id: int
+    source_id: int
+    started_at: str
+    ended_at: str | None
+    status: str  # "running" / "succeeded" / "failed"
+    records_ingested: int
+    records_failed: int
+    error_message: str | None
+
+
 class SQLiteStore:
     """Thread-local SQLite store.
 
@@ -434,6 +459,136 @@ class SQLiteStore:
                 (now_iso,),
             )
         return int(cur.rowcount or 0)
+
+    # -- Import sources + runs (Sprint 22) -----------------------------------
+    def add_import_source(
+        self,
+        *,
+        label: str,
+        kind: str,
+        url: str | None = None,
+        metadata_prefix: str | None = None,
+        set_spec: str | None = None,
+        schema_profile: str = "library",
+    ) -> ImportSource:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO import_sources(
+                    label, kind, url, metadata_prefix, set_spec,
+                    schema_profile, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (label, kind, url, metadata_prefix, set_spec, schema_profile, now),
+            )
+            row_id = int(cur.lastrowid or 0)
+        return ImportSource(
+            id=row_id,
+            label=label,
+            kind=kind,
+            url=url,
+            metadata_prefix=metadata_prefix,
+            set_spec=set_spec,
+            schema_profile=schema_profile,
+            created_at=now,
+            last_run_at=None,
+        )
+
+    def list_import_sources(self) -> list[ImportSource]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, label, kind, url, metadata_prefix, set_spec,
+                       schema_profile, created_at, last_run_at
+                FROM import_sources
+                ORDER BY created_at DESC
+                """
+            ).fetchall()
+        return [ImportSource(**dict(row)) for row in rows]
+
+    def get_import_source(self, source_id: int) -> ImportSource | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT id, label, kind, url, metadata_prefix, set_spec,
+                       schema_profile, created_at, last_run_at
+                FROM import_sources WHERE id = ?
+                """,
+                (int(source_id),),
+            ).fetchone()
+        return ImportSource(**dict(row)) if row else None
+
+    def delete_import_source(self, source_id: int) -> bool:
+        with self._connect() as conn:
+            cur = conn.execute("DELETE FROM import_sources WHERE id = ?", (int(source_id),))
+        return int(cur.rowcount or 0) > 0
+
+    def start_import_run(self, source_id: int) -> int:
+        """Record the start of an import; returns the new run id."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO import_runs(source_id, started_at, status)
+                VALUES (?, ?, 'running')
+                """,
+                (int(source_id), now),
+            )
+            run_id = int(cur.lastrowid or 0)
+        return run_id
+
+    def finish_import_run(
+        self,
+        run_id: int,
+        *,
+        status: str,
+        records_ingested: int = 0,
+        records_failed: int = 0,
+        error_message: str | None = None,
+    ) -> None:
+        """Close an import run and update the parent ``last_run_at``."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE import_runs
+                SET ended_at = ?, status = ?, records_ingested = ?,
+                    records_failed = ?, error_message = ?
+                WHERE id = ?
+                """,
+                (
+                    now,
+                    status,
+                    int(records_ingested),
+                    int(records_failed),
+                    error_message,
+                    int(run_id),
+                ),
+            )
+            conn.execute(
+                """
+                UPDATE import_sources SET last_run_at = ?
+                WHERE id = (SELECT source_id FROM import_runs WHERE id = ?)
+                """,
+                (now, int(run_id)),
+            )
+
+    def list_import_runs(self, source_id: int, limit: int = 20) -> list[ImportRun]:
+        safe_limit = max(1, min(int(limit), 200))
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, source_id, started_at, ended_at, status,
+                       records_ingested, records_failed, error_message
+                FROM import_runs
+                WHERE source_id = ?
+                ORDER BY started_at DESC
+                LIMIT ?
+                """,
+                (int(source_id), safe_limit),
+            ).fetchall()
+        return [ImportRun(**dict(row)) for row in rows]
 
     def purge_usage_events_older_than(self, retention_days: int) -> int:
         """Delete usage_events rows whose ISO timestamp predates the cutoff.

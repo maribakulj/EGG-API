@@ -16,6 +16,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from app import __version__
+from app.admin_api.imports import router as admin_imports_router
 from app.admin_api.keys import router as admin_keys_router
 from app.admin_api.releases import router as admin_releases_router
 from app.admin_api.routes import router as admin_router
@@ -157,6 +158,8 @@ app.include_router(admin_router)
 app.include_router(admin_keys_router)
 # /admin/v1/releases (Sprint 19): installed-version + update-check info.
 app.include_router(admin_releases_router)
+# /admin/v1/imports (Sprint 22): OAI-PMH import sources + runs.
+app.include_router(admin_imports_router)
 app.include_router(admin_ui_router)
 app.mount(
     "/admin-static",
