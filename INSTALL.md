@@ -40,6 +40,35 @@ egg-api print-paths
 egg-api check-backend
 ```
 
+## Desktop bundle (experimental, Sprint 17)
+
+For non-technical operators, a packaged build is in preview. The
+runtime is identical (FastAPI + SQLite) but wraps into a native
+window:
+
+```bash
+# install the extra once
+python -m pip install -e ".[desktop]"
+
+# launch in a pywebview window
+egg-api-desktop
+```
+
+The launcher auto-selects a loopback port, mints the same one-time
+magic link as `egg-api start`, and opens the wizard inside the
+native webview. Config and state live in the OS-native user data
+directory:
+
+- Windows: `%APPDATA%\EGG-API`
+- macOS: `~/Library/Application Support/EGG-API`
+- Linux: `$XDG_DATA_HOME/egg-api` (or `~/.local/share/egg-api`)
+
+Binary installers (`.msi`, `.pkg`, AppImage) are produced by the
+`desktop-package.yml` GitHub Actions workflow on every release tag.
+**The artefacts are currently unsigned**; macOS and Windows will
+warn the first time they are opened. Code signing is scheduled for
+Sprint 19.
+
 ## Admin access
 
 - Admin UI login: `http://127.0.0.1:8000/admin/login`

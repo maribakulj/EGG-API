@@ -4,6 +4,7 @@ import contextlib
 import os
 import secrets
 import stat
+import sys
 from pathlib import Path
 
 DEFAULT_HOME_DIR = Path(".")
@@ -13,6 +14,35 @@ DEFAULT_BOOTSTRAP_KEY_FILE = Path("data/bootstrap_admin.key")
 DEFAULT_CSRF_KEY_FILE = Path("data/csrf_signing.key")
 
 LEGACY_INSECURE_BOOTSTRAP_KEY = "admin-change-me"
+
+
+def desktop_home_dir() -> Path:
+    """Return the OS-native user-data directory for the desktop bundle.
+
+    Matches what operators expect from a packaged app:
+
+    - Windows: ``%APPDATA%\\EGG-API`` (with a safe fallback),
+    - macOS:   ``~/Library/Application Support/EGG-API``,
+    - Linux:   ``$XDG_DATA_HOME/egg-api`` or ``~/.local/share/egg-api``.
+
+    The CLI flow keeps honouring the plain working directory so an
+    ``egg-api init`` in a checkout still writes to ``./config`` /
+    ``./data``. The Briefcase launcher sets ``EGG_HOME`` to this
+    value before importing the app, which means every other module
+    goes through :func:`get_home_dir` and picks the override up.
+    """
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "EGG-API"
+    if os.name == "nt":
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            return Path(appdata) / "EGG-API"
+        return Path.home() / "AppData" / "Roaming" / "EGG-API"
+    # Linux + other POSIX (BSD, etc.)
+    xdg_data_home = os.environ.get("XDG_DATA_HOME")
+    if xdg_data_home:
+        return Path(xdg_data_home) / "egg-api"
+    return Path.home() / ".local" / "share" / "egg-api"
 
 
 def get_home_dir() -> Path:

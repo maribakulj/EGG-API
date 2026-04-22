@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Sprint 17 — desktop packaging** (Briefcase + pywebview):
+  - New `app/desktop.py` entry point (`egg-api-desktop`). Runs
+    uvicorn in a daemon thread, primes the config/DB on first launch,
+    mints a magic-link OTP and opens it inside a pywebview window
+    (or falls back to a printed URL + plain server when pywebview is
+    unavailable).
+  - New `runtime_paths.desktop_home_dir()` resolves the OS-native
+    user-data directory (Windows `%APPDATA%`, macOS
+    `~/Library/Application Support`, Linux `$XDG_DATA_HOME`).
+    `ensure_desktop_home()` honours an operator-set `EGG_HOME` and
+    otherwise creates the native dir + exports the env var so every
+    downstream path lookup agrees.
+  - New `[desktop]` optional dependency pulls `pywebview>=5.0`.
+  - `pyproject.toml` gains a `[tool.briefcase]` block configuring
+    macOS `.pkg`, Windows `.msi` and Linux AppImage builds.
+  - New GitHub Actions workflow `desktop-package.yml` runs `briefcase
+    create/build/package` on a three-OS matrix and uploads the
+    resulting installers as workflow artefacts. Signing is out of
+    scope for this sprint: artefacts ship unsigned and the README
+    calls this out.
 - **Sprint 16 — first-run UX**:
   - New `egg-api start` command: generates the bootstrap admin key,
     prints it once to the terminal, mints a one-time magic link

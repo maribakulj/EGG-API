@@ -1,0 +1,83 @@
+name: Desktop packaging
+
+# Matrix builds of the Briefcase-packaged desktop app on Windows, macOS
+# and Linux. Runs on tags (v*) and can also be dispatched manually. The
+# artefacts are uploaded as workflow run outputs; attaching them to a
+# GitHub Release is done by release.yml when it triggers on a tag.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-package-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: Package (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS
+            runner: macos-latest
+            briefcase_target: macOS app
+            artifact_glob: "dist/**/*.pkg"
+          - name: Windows
+            runner: windows-latest
+            briefcase_target: windows MSI
+            artifact_glob: "dist/**/*.msi"
+          - name: Linux
+            runner: ubuntu-latest
+            briefcase_target: linux -p AppImage
+            artifact_glob: "dist/**/*.AppImage"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Linux system packages for WebKitGTK
+        if: matrix.name == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgirepository1.0-dev \
+            libcairo2-dev \
+            libpango1.0-dev \
+            libwebkit2gtk-4.1-dev \
+            gir1.2-webkit2-4.1
+
+      - name: Install Briefcase
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install briefcase
+
+      - name: Briefcase create
+        run: briefcase create ${{ matrix.briefcase_target }}
+
+      - name: Briefcase build
+        run: briefcase build ${{ matrix.briefcase_target }}
+
+      - name: Briefcase package (unsigned)
+        # --adhoc-sign is the escape hatch for macOS (ad-hoc notarization
+        # is out of scope this sprint); Windows/Linux ignore the flag.
+        run: briefcase package ${{ matrix.briefcase_target }} --adhoc-sign
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: egg-api-${{ matrix.name }}
+          path: ${{ matrix.artifact_glob }}
+          if-no-files-found: error
+          retention-days: 14
