@@ -6,10 +6,10 @@ name: Desktop packaging
 # GitHub Release is done by release.yml when it triggers on a tag.
 
 on:
+  # Tag pushes trigger release.yml (which runs the same matrix and
+  # attaches the installers to the GitHub release). Keep this workflow
+  # as a manual escape hatch for dry-run builds off a branch.
   workflow_dispatch:
-  push:
-    tags:
-      - "v*"
 
 permissions:
   contents: read

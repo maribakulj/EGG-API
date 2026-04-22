@@ -1,6 +1,6 @@
 [project]
 name = "egg-api"
-version = "1.0.0"
+version = "2.0.0"
 description = "EGG-API: safe, normalized API facade for GLAM search backends"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -169,7 +169,7 @@ ignore_missing_imports = true
 [tool.briefcase]
 project_name = "EGG-API"
 bundle = "org.eggapi"
-version = "1.0.0"
+version = "2.0.0"
 url = "https://github.com/maribakulj/egg-api"
 license.file = "LICENSE"
 author = "EGG-API Contributors"

@@ -1,0 +1,76 @@
+:root {
+  --bg: #fafafb;
+  --fg: #1d1d1f;
+  --muted: #4a4a52;
+  --accent: #1557b0;
+  --accent-hover: #0f4498;
+  --card: #ffffff;
+  --border: #dcdce1;
+  --warn-bg: #fff8dd;
+  --warn-border: #e6cc6e;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+  line-height: 1.55;
+}
+a { color: var(--accent); text-decoration: none; }
+a:hover { color: var(--accent-hover); text-decoration: underline; }
+code { background: #eee; padding: 0.08rem 0.3rem; border-radius: 3px; font-size: 0.88em; }
+
+header {
+  border-bottom: 1px solid var(--border);
+  background: #fff;
+  position: sticky; top: 0; z-index: 10;
+}
+nav {
+  max-width: 960px; margin: 0 auto; padding: 0.8rem 1.5rem;
+  display: flex; gap: 1.2rem; align-items: center;
+}
+nav a { color: var(--fg); }
+nav a.brand { font-weight: 700; font-size: 1.15rem; margin-right: auto; color: var(--accent); }
+
+main { max-width: 960px; margin: 0 auto; padding: 2rem 1.5rem 3rem; }
+
+section { margin-bottom: 3rem; }
+h1, h2, h3 { line-height: 1.25; }
+
+.hero h1 { font-size: 2.2rem; margin-bottom: 0.6rem; }
+.hero .tagline { font-size: 1.1rem; color: var(--muted); max-width: 640px; }
+.hero .cta { margin-top: 1.5rem; display: flex; gap: 0.6rem; flex-wrap: wrap; }
+.hero .cta a {
+  display: inline-block; padding: 0.6rem 1.1rem; border-radius: 6px;
+  font-weight: 600; border: 1px solid var(--accent);
+}
+.hero .cta a.primary { background: var(--accent); color: #fff; }
+.hero .cta a.primary:hover { background: var(--accent-hover); color: #fff; }
+.hero .cta a.secondary { color: var(--accent); background: transparent; }
+.hero .version { color: var(--muted); font-size: 0.9rem; margin-top: 0.8rem; }
+
+.features ol { padding-left: 1.4rem; }
+.features li { margin-bottom: 0.6rem; }
+
+.download-grid, .grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1rem;
+}
+.card {
+  background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+  padding: 1rem;
+}
+.card h3 { margin-top: 0; }
+
+.download .note {
+  background: var(--warn-bg); border: 1px solid var(--warn-border); border-radius: 6px;
+  padding: 0.7rem 1rem; margin-top: 1rem; color: #4a4010; font-size: 0.92rem;
+}
+
+footer {
+  border-top: 1px solid var(--border);
+  padding: 1rem 1.5rem; text-align: center; color: var(--muted); font-size: 0.9rem;
+}

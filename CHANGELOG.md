@@ -7,129 +7,86 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+(Nothing yet.)
+
+## [2.0.0] — 2026-04-22
+
+Major release bundling the post-1.0 review action plan (Sprints 11 →
+19). Focus: turn a hardened-but-operator-facing service into
+something a non-technical archivist can actually install and run.
+
+### Breaking
+
+- `app` package version bumped to `2.0.0`; Briefcase bundle likewise.
+- Briefcase desktop entry point (`egg-api-desktop`) now pins
+  `EGG_HOME` to the OS-native user directory instead of the process
+  cwd. Operators upgrading from 1.x without the desktop bundle are
+  unaffected (the CLI flow still honours `$EGG_HOME` / `./config`).
+- Public API default changed: every `AppConfig` sub-model now uses
+  Pydantic `extra="forbid"`. Unknown keys in `config/egg.yaml` fail
+  `egg-api check-config` rather than being silently ignored.
+- `ConfigManager.save()` now chmods `config/egg.yaml` to `0600` on
+  POSIX, matching the bootstrap key sidecar.
+- `backend.auth` block is mandatory for authenticated Elasticsearch /
+  OpenSearch clusters (Basic / Bearer / ApiKey). Legacy deployments
+  that embed credentials in `backend.url` continue to work but are
+  discouraged.
+- `make run` dropped `--reload`; `make dev` is now the auto-reload
+  target.
+- Coverage gate raised to 79 % (from 78 %); a dedicated polish sprint
+  will push it back above 80 %.
+
 ### Added
 
-- **Sprint 18 — hardening + ops endpoints**:
-  - Admin UI sessions now honour an **idle timeout** (migration 8
-    adds `ui_sessions.last_activity_at`; `auth.admin_session_idle_timeout_minutes`
-    defaults to 15). Every successful session lookup bumps the
-    timestamp; the TTL and idle checks run in the same store call.
-  - New **public-API 401 lockout** (`app/rate_limit/lockout.py`):
-    per-IP sliding-window counter. Once
-    `auth.public_401_lockout_threshold` 401s are observed within
-    `auth.public_401_lockout_window_seconds`, every subsequent
-    request from the same IP is short-circuited with 429 until the
-    window rolls over. A new middleware in `app.main` applies this
-    to `/v1/*` only; the admin login keeps its own brute-force guard.
-  - **Template mapper whitelist** (`app/mappers/schema_mapper.py`):
-    `FieldMapping.allowed_fields` constrains which backend keys a
-    `template` rule may substitute. When empty, the mapper falls
-    back to the names literally referenced by the template string —
-    keeping legacy configs working while refusing to interpolate any
-    `_score`/`_version`/etc. sneaking in through `doc`.
-  - New `GET /admin/v1/logs` (SPECS §13.12): filterable structured
-    log query with `endpoint`, `status_min`/`status_max`, `since`,
-    `until`, `key_id`, pagination. Backs the admin dashboard's
-    activity panel and integrator ops scripts.
-  - New `GET /admin/v1/export-config` + `POST /admin/v1/import-config`
-    (SPECS §13.15-16): YAML round-trip with the same redaction
-    policy as `ConfigManager.save()` (bootstrap key + inline backend
-    secrets stripped).
-- **Sprint 17 — desktop packaging** (Briefcase + pywebview):
-  - New `app/desktop.py` entry point (`egg-api-desktop`). Runs
-    uvicorn in a daemon thread, primes the config/DB on first launch,
-    mints a magic-link OTP and opens it inside a pywebview window
-    (or falls back to a printed URL + plain server when pywebview is
-    unavailable).
-  - New `runtime_paths.desktop_home_dir()` resolves the OS-native
-    user-data directory (Windows `%APPDATA%`, macOS
-    `~/Library/Application Support`, Linux `$XDG_DATA_HOME`).
-    `ensure_desktop_home()` honours an operator-set `EGG_HOME` and
-    otherwise creates the native dir + exports the env var so every
-    downstream path lookup agrees.
-  - New `[desktop]` optional dependency pulls `pywebview>=5.0`.
-  - `pyproject.toml` gains a `[tool.briefcase]` block configuring
-    macOS `.pkg`, Windows `.msi` and Linux AppImage builds.
-  - New GitHub Actions workflow `desktop-package.yml` runs `briefcase
-    create/build/package` on a three-OS matrix and uploads the
-    resulting installers as workflow artefacts. Signing is out of
-    scope for this sprint: artefacts ship unsigned and the README
-    calls this out.
-- **Sprint 16 — first-run UX**:
-  - New `egg-api start` command: generates the bootstrap admin key,
-    prints it once to the terminal, mints a one-time magic link
-    (`/admin/setup-otp/<token>`, 5-min TTL, hashed at rest), opens
-    the default browser (skippable via `--no-browser`) and drops
-    into uvicorn. Idempotent: a second run reuses the existing key.
-  - New `/admin/setup-otp/{token}` route exchanges the OTP for an
-    admin UI session and bounces to `/admin/ui/setup`; replayed or
-    expired tokens surface the login page with a clear message.
-  - New migration 7 creates `setup_otps`; `SQLiteStore` gains
-    `create_setup_otp` / `consume_setup_otp` /
-    `purge_expired_setup_otps`.
-  - New `app/user_errors.py` translates common `AppError` codes and
-    Pydantic `ValidationError` payloads into plain-language messages
-    with a suggestion. `egg-api check-config` / `check-backend`
-    now surface those translations instead of raw exceptions.
-- **Sprint 15 — setup wizard, screens 4-8 + publish** (SPECS §26):
-  completes the guided flow. New screens under `/admin/ui/setup`:
-  *security* (profile + public mode), *exposure*
-  (facets/sorts/include_fields allowlists), *keys* (mint the first
-  public key via the shared `ApiKeyService`), *test* (run a live
-  probe search), *done* (summary) and `POST /admin/ui/setup/publish`
-  which assembles a valid `AppConfig` via `draft_to_config()` and
-  swaps the running container onto it. Inline secrets in the draft
-  are wiped after publication; operator-only fields (cors, proxy,
-  bootstrap key, storage paths) are preserved from the active config.
-- **Help glossary** at `/admin/ui/help`: plain-language definitions
-  of the terms used across the wizard (backend, index, mapping,
-  facet, profile…). Linked from the base navigation.
-- **Sprint 14 — setup wizard, screens 1-3** (SPECS §26): new admin UI
-  flow under `/admin/ui/setup` that walks operators through *backend →
-  source → mapping*. State lives in a per-admin `setup_drafts` row
-  (migration 6), not in `egg.yaml`, so an operator can resume after a
-  disconnect; the final publish step arrives in Sprint 15. The backend
-  step can probe the candidate server without touching the running
-  container; the source step runs `scan_fields` and lists discovered
-  indices/fields; the mapping step pre-fills a heuristic proposal from
-  the discovered fields.
-- **Sprint 13 — REST CRUD for API keys** (SPECS §13.7-13.10):
-  `GET/POST/PATCH/DELETE /admin/v1/keys` + `GET/PATCH/DELETE
-  /admin/v1/keys/{key_id}`. The raw secret is disclosed exactly once
-  (on create and on rotate) and never included in list/get responses.
-  Admin UI and REST API now share a single `ApiKeyService`, so label
-  validation, duplicate detection and session invalidation live in one
-  place. `DELETE` is a soft-revoke to preserve the `usage_events`
-  audit trail.
-- **Sprint 12 — deployment hardening**:
-  - `backend.auth` config block supports `none` / `basic` / `bearer` /
-    `api_key` and is threaded through the ES + OpenSearch adapters.
-    Inline `password` / `token` are redacted by `ConfigManager.save()`;
-    operators should use the `password_env` / `token_env` indirection
-    to keep secrets off disk.
-  - `proxy.allowed_hosts` → Starlette `TrustedHostMiddleware` rejects
-    requests with an unexpected `Host` header before any handler runs.
-  - Multi-worker guardrail: refuse to boot in production (and warn in
-    development) when `EGG_WORKERS` / `WEB_CONCURRENCY` /
-    `UVICORN_WORKERS > 1` without `EGG_RATE_LIMIT_REDIS_URL`. Prevents
-    a silent N× rate-limit inflation with the in-memory limiter.
-  - `extra="forbid"` on every `AppConfig` sub-model: typos in
-    `config/egg.yaml` now fail `egg-api check-config` instead of being
-    silently ignored.
+- **Sprint 11 — honesty pass**: README aligned with shipped reality
+  (suggest live, manifest retired), desktop promise reframed as a
+  3-step roadmap, SECURITY.md, CONTRIBUTING.md,
+  `.github/dependabot.yml`.
+- **Sprint 12 — deployment hardening**: `backend.auth` config block
+  (none/basic/bearer/api_key), `proxy.allowed_hosts` +
+  `TrustedHostMiddleware`, multi-worker-without-Redis guardrail at
+  boot, Pydantic `extra="forbid"` across the tree.
+- **Sprint 13 — REST CRUD for API keys** (SPECS §13.7-13.10) via a
+  shared `ApiKeyService` used by both the REST surface and the Jinja
+  admin UI.
+- **Sprint 14 + 15 — setup wizard** (SPECS §26): eight-screen guided
+  flow at `/admin/ui/setup` covering backend → source → mapping →
+  security → exposure → first public key → live test → publish. New
+  `setup_drafts` migration, `ApiKeyService` reuse, `draft_to_config`
+  helper that preserves operator-only fields (cors/proxy/bootstrap).
+  Glossary page at `/admin/ui/help`.
+- **Sprint 16 — first-run UX**: `egg-api start` (one-command
+  launcher), `/admin/setup-otp/{token}` magic link (hashed, 5-min
+  TTL, single-use), plain-language error translation in
+  `app.user_errors`.
+- **Sprint 17 — desktop packaging**: `app/desktop.py` entry point,
+  Briefcase bundle metadata for macOS `.pkg` / Windows `.msi` /
+  Linux AppImage, OS-native `EGG_HOME` resolution, matrix-build
+  GitHub Actions workflow.
+- **Sprint 18 — hardening + ops endpoints**: admin session idle
+  timeout (migration 8), public 401 lockout per IP, template mapper
+  `allowed_fields` whitelist, `GET /admin/v1/logs`,
+  `GET /admin/v1/export-config` + `POST /admin/v1/import-config`.
+- **Sprint 19 — release 2.0**: `GET /admin/v1/releases` (admin-gated
+  version + update check against GitHub Releases, 10-min cache,
+  opt-out via `EGG_DISABLE_RELEASE_CHECK=1`), tag-driven
+  `release.yml` now builds + attaches the three desktop installers
+  alongside the wheel/sdist + SHA256SUMS, static landing page under
+  `docs/site/`, signing + auto-update playbook in `docs/signing.md`.
 
-### Changed
+### Security
 
-- **Sprint 11 — honesty pass**: README and SPECS aligned with the
-  v1.0.0 reality. `/v1/suggest` is live, `/v1/manifest/{id}` retired,
-  Solr marked deferred, the desktop story reframed as a 3-step roadmap
-  instead of an aspirational promise. Added `SECURITY.md`,
-  `CONTRIBUTING.md`, `.github/dependabot.yml`. Split `make dev`
-  (auto-reload) from `make run` (production-style). `ConfigManager`
-  now chmods `config/egg.yaml` to 0600 on POSIX.
-- **Coverage gate temporarily 78%** (Sprint 15): the wizard added
-  ~600 lines of Jinja/route plumbing whose error branches are
-  intentionally defensive. Sprint 18 tightens per-package thresholds
-  (auth/policy/storage at 90%) and restores the overall gate to 80%+.
+- Idle timeout on admin sessions (15-min default, knob:
+  `auth.admin_session_idle_timeout_minutes`).
+- Public `/v1/*` 401 lockout per IP (sliding window, knobs:
+  `auth.public_401_lockout_threshold` +
+  `auth.public_401_lockout_window_seconds`).
+- Template mapper no longer interpolates arbitrary backend fields:
+  the placeholder pruner runs before `Template.safe_substitute` so
+  un-whitelisted `$placeholders` are stripped from the emitted
+  value.
+- `backend.auth.password` / `backend.auth.token` are redacted by
+  `ConfigManager.save()` (Sprint 12, restated for the 2.0 audit).
 
 ## [1.0.0] — 2026-04-21
 

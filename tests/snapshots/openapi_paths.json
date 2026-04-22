@@ -42,6 +42,7 @@
     "/admin/v1/keys",
     "/admin/v1/keys/{key_id}",
     "/admin/v1/logs",
+    "/admin/v1/releases",
     "/admin/v1/setup/create-config",
     "/admin/v1/setup/detect",
     "/admin/v1/setup/scan-fields",
