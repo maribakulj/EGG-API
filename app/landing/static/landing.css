@@ -43,6 +43,15 @@ a:hover { text-decoration: underline; }
   margin-left: 0.4rem;
 }
 .topbar nav a { margin-left: 1rem; font-size: 0.9rem; }
+.topbar nav .lang-switch {
+  margin-left: 1.2rem;
+  padding-left: 1rem;
+  border-left: 1px solid var(--line);
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.topbar nav .lang-switch strong { color: var(--fg); }
+.topbar nav .lang-switch a { margin-left: 0; }
 
 .hero {
   max-width: 960px;

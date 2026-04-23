@@ -9,6 +9,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Sprint 29 — French i18n + user-journey tests** makes the product
+  approachable for the francophone half of the target market (Koha,
+  PMB, AtoM, Mnesys, Ligeo deployments across France, Belgium, Quebec,
+  francophone Africa) and locks down the full non-technical operator
+  flow with end-to-end tests.
+  - New ``app/i18n.py`` — stdlib-only translation registry with two
+    catalogues (``en`` default, ``fr``) held as plain dicts so
+    operators can read and extend them without learning gettext.
+    Resolver priority is ``?lang=`` query param → ``egg_lang`` cookie
+    → ``Accept-Language`` header → ``EGG_DEFAULT_LANG`` env → English
+    fallback; unknown keys degrade to the English text or the raw
+    key (never to a crash).
+  - Landing page (``/``) and about page (``/about``) now render fully
+    in French when the resolver picks it, including the hero, CTAs,
+    status tile, cards, the "who is it for", "profiles", "nine
+    importers", "what it is not" and "next steps" sections. The
+    header nav grows a language switcher ("English · Français") and
+    selecting a language via ``?lang=`` writes an ``egg_lang`` cookie
+    so the preference follows the operator across pages.
+  - ``EGG_DEFAULT_LANG=fr`` lets deployments boot the landing page
+    in French out of the box.
+  - 19 new tests split across two modules:
+    - ``tests/security/test_sprint29_i18n.py`` (13 cases) — resolver
+      priority (query > cookie > header > env > default), landing and
+      about rendered in French with the ``<html lang="fr">`` marker,
+      cookie persistence on ``?lang=``, the language switcher
+      appearing in both labels, unsupported ``?lang=de`` falling back
+      cleanly without cookie pollution, and the translator's key
+      fallback / unknown-language paths.
+    - ``tests/security/test_sprint29_user_journey.py`` (6 cases +
+      1 scheduler round-trip) — a single non-technical operator's
+      walk through the product: anonymous landing, OAI endpoint
+      probe, admin console, imports dashboard, CSV flat-file source
+      created through the admin UI, source run, ``bulk_index``
+      assertion, public ``/v1/search`` still answers. A second case
+      replays the flow in French. A third case drives the S27
+      scheduler: creates a ``daily`` source, backdates
+      ``next_run_at``, runs ``Scheduler.run_pending()``, asserts the
+      next run was rolled forward.
+
 - **Sprint 28 — Public landing page + positioning** gives
   non-technical visitors a first page that explains what EGG-API is,
   who it is for, and how to get started — without assuming they

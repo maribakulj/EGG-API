@@ -29,6 +29,13 @@ archive), nine importers, the outbound OAI-PMH provider, and a
 and positioning. Both pages render without JavaScript and degrade
 gracefully when the backend is offline.
 
+**Bilingual by default (Sprint 29).** The landing page and `/about`
+render in English or French depending on a `?lang=fr` / `?lang=en`
+query parameter, an `egg_lang` cookie, or the browser's
+`Accept-Language` header. An `EGG_DEFAULT_LANG=fr` environment
+variable lets a francophone deployment (Koha / PMB / AtoM / Mnesys /
+Ligeo) boot directly in French.
+
 ### Current delivery & desktop roadmap
 
 **Today**, EGG-API ships as a FastAPI service with a web-based admin UI at
