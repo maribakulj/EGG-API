@@ -25,18 +25,21 @@
         <option value="oaipmh" selected>OAI-PMH — Dublin Core (universal SIGB/OAI)</option>
         <option value="oaipmh_lido">OAI-PMH — LIDO (museums)</option>
         <option value="oaipmh_marcxml">OAI-PMH — MARCXML (Koha, Aleph, Symphony…)</option>
+        <option value="oaipmh_ead">OAI-PMH — EAD (archives, AtoM, Ligeo…)</option>
         <option value="lido_file">LIDO — flat XML file on this machine</option>
         <option value="marc_file">MARC — binary .mrc (ISO 2709)</option>
         <option value="marcxml_file">MARCXML — flat XML file</option>
         <option value="csv_file">CSV — flat spreadsheet (header-named columns)</option>
+        <option value="ead_file">EAD — flat XML file (finding aid)</option>
       </select>
       <p class="help">
         Pick OAI-PMH — Dublin Core for any SIGB / catalogue with OAI.
         Pick the LIDO variants for museum DAMS (Axiell, Micromusée, TMS, Mobydoc).
         Pick MARC / MARCXML for libraries that export their catalogue as MARC
-        files (Koha, PMB, Orphée, Aleph, Symphony). Pick CSV when your
-        software only exports spreadsheets — save as UTF-8 CSV with an
-        <code class="muted">id</code> column.
+        files (Koha, PMB, Orphée, Aleph, Symphony). Pick EAD for archive
+        finding aids (AtoM, Mnesys, Ligeo, ArchivesSpace, PLEADE). Pick CSV
+        when your software only exports spreadsheets — save as UTF-8 CSV
+        with an <code class="muted">id</code> column.
       </p>
     </label>
     <label>

@@ -72,6 +72,30 @@ class MuseumFields(BaseModel):
     current_location: str | None = None
 
 
+class ArchiveFields(BaseModel):
+    """Archive-oriented fields (Sprint 26).
+
+    Populated when the deployment uses the ``archive`` schema profile
+    and the operator maps EAD-style fields (``archive.unit_id``,
+    ``archive.scope_content``, …). Kept ``None`` when the deployment
+    does not need them, the same way :class:`MuseumFields` stays
+    out of the wire response for library / museum profiles.
+
+    ``parent_id`` is the component hierarchy pointer — every ``<c>``
+    element in an EAD finding aid references its parent archival
+    unit so clients can rebuild the tree without the importer having
+    to flatten it on ingest.
+    """
+
+    unit_id: str | None = None  # <unitid>
+    unit_level: str | None = None  # fonds / series / file / item / …
+    extent: str | None = None  # physical extent
+    repository: str | None = None  # holding institution
+    scope_content: str | None = None  # <scopecontent>
+    access_conditions: str | None = None  # <accessrestrict>
+    parent_id: str | None = None  # pointer to the parent component
+
+
 class Record(BaseModel):
     """Public record shape.
 
@@ -110,6 +134,10 @@ class Record(BaseModel):
     # none of the inner fields are mapped, so a library-only deployment
     # does not emit an empty ``"museum": {...}`` block.
     museum: MuseumFields | None = None
+    # Sprint 26: archive-specific fields (EAD-style finding aids).
+    # Same contract — absent on the wire unless the operator maps at
+    # least one of the inner fields.
+    archive: ArchiveFields | None = None
 
 
 class SearchResponse(BaseModel):

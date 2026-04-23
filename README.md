@@ -208,16 +208,23 @@ allowed_include_fields:  # Fields that may appear in include_fields
 mapping:          # Public field → backend source rules
 ```
 
-The `schema_profile` knob (Sprint 23) widens the public Record shape:
-`museum` adds a `museum: { inventory_number, artist, medium, dimensions,
-acquisition_date, current_location }` sub-block and enables the IIIF
-passthrough at `/v1/manifest/{id}` when `links.iiif_manifest` is mapped.
-`library` and `archive` keep the lean shape (`id, type, title, description,
-creators`). `custom` disables the auto-suggest hints in the wizard for
-operators who want to drive everything by hand. Mapping keys may use a
-dotted form (`museum.inventory_number`, `links.iiif_manifest`) to feed the
-new sub-blocks; an empty sub-block is dropped from the response so a
-library deployment never sees a stray `museum: {}`.
+The `schema_profile` knob (Sprint 23 + 26) widens the public Record
+shape when the deployment needs it:
+- `museum` adds `museum: { inventory_number, artist, medium, dimensions,
+  acquisition_date, current_location }` and enables the IIIF passthrough
+  at `/v1/manifest/{id}` when `links.iiif_manifest` is mapped.
+- `archive` adds `archive: { unit_id, unit_level, extent, repository,
+  scope_content, access_conditions, parent_id }` — populated by EAD
+  imports (Sprint 26) or by any backend that can surface those fields.
+- `library` keeps the lean shape (`id, type, title, description,
+  creators`).
+- `custom` disables the auto-suggest hints for operators who want to
+  drive every mapping rule by hand.
+
+Mapping keys may use a dotted form (`museum.inventory_number`,
+`archive.scope_content`, `links.iiif_manifest`) to feed the sub-blocks;
+an empty sub-block is dropped from the response so a library deployment
+never sees a stray `museum: {}` or `archive: {}`.
 
 ### Security profile
 
@@ -425,17 +432,21 @@ Same-origin console at `/admin/*`, served by Jinja2 templates (autoescape enforc
   when ES lives on a known internal hostname. Nothing reaches
   `config/egg.yaml` until the operator clicks *Publish*; drafts are
   per-admin and survive disconnects.
-- `/admin/ui/imports` — **Data imports** (Sprint 22-25): connect your
+- `/admin/ui/imports` — **Data imports** (Sprint 22-26): connect your
   library, museum or archive catalogue (Koha, PMB, AtoM, Axiell,
   MuseumPlus, TMS, Micromusée, Mobydoc, CollectionSpace, Orphée,
-  Aleph, Symphony, …) to EGG-API and harvest records into the active
-  backend. Seven importer kinds are available:
+  Aleph, Symphony, Mnesys, Ligeo, ArchivesSpace, PLEADE, …) to
+  EGG-API and harvest records into the active backend. Nine importer
+  kinds are available:
   - **OAI-PMH — Dublin Core** (S22): universal SIGB/OAI protocol.
   - **OAI-PMH — LIDO** (S24): same protocol with the LIDO museum
     metadata prefix. Maps into the museum schema profile.
   - **OAI-PMH — MARCXML** (S25): for catalogues that expose
     MARCXML over OAI (typical of Aleph / Symphony / Koha). Flavor
     (MARC21 / UNIMARC) chosen per source.
+  - **OAI-PMH — EAD** (S26): archive finding aids over OAI. One
+    OAI record expands to many backend documents (archdesc root
+    + every component); each carries a `parent_id` pointer.
   - **LIDO — flat XML file** (S24): absolute filesystem path, no
     OAI envelope.
   - **MARC — binary `.mrc` (ISO 2709)** (S25): the raw MARC
@@ -446,8 +457,9 @@ Same-origin console at `/admin/*`, served by Jinja2 templates (autoescape enforc
     LibreOffice as UTF-8 CSV, name one column `id`, EGG ingests.
     Semicolon, tab and comma dialects are all sniffed; plural
     columns (`creators`, `subject`, …) accept the `|` separator.
-
-  EAD (archive finding aids) comes in S26.
+  - **EAD — flat XML file** (S26): archive finding aids (EAD 2002
+    or EAD3) served up as a single XML file. Same tree expansion
+    as the OAI variant.
 - `/admin/ui/help` — glossary of the technical terms used across the
   console, written for non-technical operators.
 - `/admin/ui/config` — editable configuration form.

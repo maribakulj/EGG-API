@@ -547,18 +547,20 @@ def imports_page(request: Request):
 
 
 _ALLOWED_PROFILES = {"library", "museum", "archive", "custom"}
-_ALLOWED_PREFIXES = {"oai_dc", "lido", "marcxml"}
-# Sprint 24 adds LIDO over OAI-PMH and flat-file LIDO; Sprint 25 adds
-# MARC (ISO 2709), MARCXML, MARCXML-over-OAI and CSV. The set is the
+_ALLOWED_PREFIXES = {"oai_dc", "lido", "marcxml", "ead"}
+# Sprint 24-26 extend the kind set: LIDO (OAI + flat), MARCXML,
+# MARC (ISO 2709), CSV, then EAD (OAI + flat). The set is the
 # single source of truth the template loops over.
 _ALLOWED_KINDS = {
     "oaipmh",
     "oaipmh_lido",
     "oaipmh_marcxml",
+    "oaipmh_ead",
     "lido_file",
     "marc_file",
     "marcxml_file",
     "csv_file",
+    "ead_file",
 }
 _MARC_FLAVORS = {"marc21", "unimarc"}
 
@@ -608,7 +610,9 @@ async def imports_add(request: Request):
         if flavor_hint not in _MARC_FLAVORS:
             return _render_imports(request, error="Unknown MARC flavor.", status_code=400)
         metadata_prefix = flavor_hint
-    elif kind in {"lido_file", "csv_file"}:
+    elif kind == "oaipmh_ead":
+        metadata_prefix = "ead"
+    elif kind in {"lido_file", "csv_file", "ead_file"}:
         metadata_prefix = ""
     elif metadata_prefix not in _ALLOWED_PREFIXES:
         return _render_imports(request, error="Unsupported metadata prefix.", status_code=400)
@@ -1089,6 +1093,15 @@ _MUSEUM_MAPPING_FIELDS: tuple[str, ...] = (
     "links.iiif_manifest",
     "links.thumbnail",
 )
+_ARCHIVE_MAPPING_FIELDS: tuple[str, ...] = (
+    "archive.unit_id",
+    "archive.unit_level",
+    "archive.extent",
+    "archive.repository",
+    "archive.scope_content",
+    "archive.access_conditions",
+    "archive.parent_id",
+)
 _ALLOWED_SCHEMA_PROFILES: frozenset[str] = frozenset({"library", "museum", "archive", "custom"})
 
 
@@ -1146,6 +1159,8 @@ async def setup_mapping_submit(request: Request):
     public_fields: tuple[str, ...] = _PUBLIC_MAPPING_FIELDS
     if profile == "museum":
         public_fields = _PUBLIC_MAPPING_FIELDS + _MUSEUM_MAPPING_FIELDS
+    elif profile == "archive":
+        public_fields = _PUBLIC_MAPPING_FIELDS + _ARCHIVE_MAPPING_FIELDS
     new_mapping: dict[str, dict[str, object]] = {}
     for public in public_fields:
         source = (data.get(f"source__{public}") or "").strip()

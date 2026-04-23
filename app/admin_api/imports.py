@@ -41,10 +41,12 @@ class CreateImportSourceRequest(_StrictModel):
         "oaipmh",
         "oaipmh_lido",
         "oaipmh_marcxml",
+        "oaipmh_ead",
         "lido_file",
         "marc_file",
         "marcxml_file",
         "csv_file",
+        "ead_file",
     ] = "oaipmh"
     url: str = Field(..., min_length=1, max_length=2048)
     # For OAI-PMH kinds this is the metadataPrefix; for MARC flat files

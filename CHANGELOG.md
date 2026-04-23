@@ -9,6 +9,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Sprint 26 — EAD importer (archive finding aids)** closes the
+  last big gap in the GLAM publication story. Archives that run
+  AtoM, Mnesys, Ligeo, ArchivesSpace, Calames, PLEADE or Pict'oOpen
+  either expose EAD over OAI-PMH or ship flat EAD XML dumps — EGG
+  now consumes both:
+  - New `app/importers/ead.py` — stdlib-only parser that handles
+    both **EAD 2002** (no namespace) and **EAD3**
+    (`http://ead3.archivists.org/schema/`) by matching on local
+    element names. Each finding aid expands into **many backend
+    documents** (one for `<archdesc>` root + one per `<c>` /
+    `<c01>`…`<c12>` descendant), each carrying a `parent_id`
+    pointer so clients can rebuild the tree without the importer
+    flattening or denormalising the hierarchy.
+  - The mapper emits flat keys for the new archive-profile sub-
+    block: `unit_id`, `unit_level`, `extent`, `repository`,
+    `scope_content`, `access_conditions`, `parent_id`. The
+    Sprint 23 dotted-mapping machinery already knows how to route
+    `archive.*` public fields into a nested `Record.archive` block.
+  - `Record` schema grows an `ArchiveFields` sub-model + optional
+    `archive` field (same contract as `MuseumFields` — absent on
+    the wire unless the deployment maps at least one inner field,
+    so libraries / museums don't grow their payloads).
+  - Setup wizard step 3 now proposes the archive sub-block
+    (`archive.unit_id`, `archive.unit_level`, `archive.extent`,
+    `archive.repository`, `archive.scope_content`,
+    `archive.access_conditions`, `archive.parent_id`) when the
+    operator selects *Archive* as the collection type. The
+    `propose_mapping` helper auto-fills those slots from common
+    backend field names (`unitid`, `scopecontent`, `level`, …).
+  - `oaipmh.iter_records`'s `record_parser` callable now accepts
+    a return value of `list[dict]` (in addition to `dict | None`),
+    so one OAI-PMH record can legitimately expand to many backend
+    docs — EAD is the first consumer.
+  - Two new importer kinds: `ead_file` (flat XML, any size) and
+    `oaipmh_ead` (OAI-PMH with `metadataPrefix=ead`). Dispatcher,
+    admin REST payload, `/identify` guard and admin UI form are
+    all updated. The UI now lists nine importer kinds covering
+    every OAI / MARC / LIDO / CSV / EAD deployment shape.
+  - 26 new tests in `tests/security/test_sprint26_ead.py` cover
+    EAD 2002 + EAD3 parsing, multi-level component hierarchy,
+    `<unitdate normal>` preference, scope/access paragraphs,
+    mixed-content `<emph>` tolerance, bare `<archdesc>` root,
+    malformed XML, flat-file ingest (happy / missing / broken),
+    OAI record expansion into many docs, dispatcher routing, the
+    archive sub-block emission through the mapper, absence of
+    `archive` on the wire for library deployments,
+    `propose_mapping` suggestions, wizard template listing the
+    slots, admin REST accepting the two new kinds, `/identify`
+    working for `oaipmh_ead`, end-to-end `/run` for `ead_file`,
+    UI form listing both EAD options, UI `/add` persisting a
+    flat-file EAD source.
+
 - **Sprint 25 — MARC21 / UNIMARC + CSV importers**: covers the
   SIGB/catalogue crowd that OAI-PMH Dublin Core leaves behind
   (Koha exports, PMB dumps, Aleph / Symphony pulls, raw spreadsheet

@@ -43,7 +43,10 @@ from app.errors import AppError
 logger = logging.getLogger("egg.importers.oaipmh")
 
 
-RecordParser = Callable[[ET.Element, "ET.Element | None"], "dict[str, Any] | None"]
+RecordParser = Callable[
+    [ET.Element, "ET.Element | None"],
+    "dict[str, Any] | list[dict[str, Any]] | None",
+]
 
 
 _NS = {
@@ -295,7 +298,16 @@ def iter_records(
                 if header is None:
                     continue
                 doc = parser(header, metadata)
-                if doc is not None:
+                # EAD and other hierarchical records produce many docs
+                # per OAI record, so the parser may return a list. All
+                # other parsers return a single dict or ``None``.
+                if doc is None:
+                    continue
+                if isinstance(doc, list):
+                    for nested in doc:
+                        if nested is not None:
+                            yield nested
+                else:
                     yield doc
 
             token_el = list_records.find("oai:resumptionToken", _NS)

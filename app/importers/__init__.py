@@ -26,6 +26,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.importers.csv_importer import ingest_csv_file
+from app.importers.ead import (
+    ingest_file as ead_ingest_file,
+    oai_record_to_docs as ead_oai_record_to_docs,
+)
 from app.importers.lido import (
     ingest_file as lido_ingest_file,
     oai_record_to_doc as lido_oai_record_to_doc,
@@ -44,15 +48,17 @@ SUPPORTED_KINDS: tuple[str, ...] = (
     "oaipmh",
     "oaipmh_lido",
     "oaipmh_marcxml",
+    "oaipmh_ead",
     "lido_file",
     "marc_file",
     "marcxml_file",
     "csv_file",
+    "ead_file",
 )
 
 # Sub-set that supports the OAI-PMH ``Identify`` verb. The admin API
 # and UI guard against calling ``/identify`` on flat-file kinds.
-OAIPMH_KINDS: frozenset[str] = frozenset({"oaipmh", "oaipmh_lido", "oaipmh_marcxml"})
+OAIPMH_KINDS: frozenset[str] = frozenset({"oaipmh", "oaipmh_lido", "oaipmh_marcxml", "oaipmh_ead"})
 
 # MARC flavors supported by :mod:`app.importers.marc`. Stored on the
 # ``metadata_prefix`` column for MARC kinds.
@@ -147,4 +153,22 @@ def run_import(source: Any, *, bulk_index: Any) -> ImportDispatchResult:
             return ImportDispatchResult(0, 0, "CSV file source has no path")
         csv_result = ingest_csv_file(path=url, bulk_index=bulk_index)
         return ImportDispatchResult(csv_result.ingested, csv_result.failed, csv_result.error)
+    if kind == "ead_file":
+        if not url:
+            return ImportDispatchResult(0, 0, "EAD file source has no path")
+        ead_result = ead_ingest_file(path=url, bulk_index=bulk_index)
+        return ImportDispatchResult(ead_result.ingested, ead_result.failed, ead_result.error)
+    if kind == "oaipmh_ead":
+        if not url:
+            return ImportDispatchResult(0, 0, "OAI-PMH (EAD) source has no URL")
+        # EAD payloads expand to many docs per OAI record; the OAI
+        # iterator accepts a parser that returns a list for this case.
+        result = oai_ingest(
+            url=url,
+            metadata_prefix=source.metadata_prefix or "ead",
+            set_spec=source.set_spec,
+            bulk_index=bulk_index,
+            record_parser=ead_oai_record_to_docs,
+        )
+        return ImportDispatchResult(result.ingested, result.failed, result.error)
     raise ValueError(f"Unknown import source kind: {kind!r}")

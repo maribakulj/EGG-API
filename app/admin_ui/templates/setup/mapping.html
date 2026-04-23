@@ -39,7 +39,7 @@
       {% if draft.schema_profile == 'museum' %}
         {% set public_fields = ['id', 'type', 'title', 'description', 'creators', 'museum.inventory_number', 'museum.artist', 'museum.medium', 'museum.dimensions', 'museum.acquisition_date', 'museum.current_location', 'links.iiif_manifest', 'links.thumbnail'] %}
       {% elif draft.schema_profile == 'archive' %}
-        {% set public_fields = ['id', 'type', 'title', 'description', 'creators'] %}
+        {% set public_fields = ['id', 'type', 'title', 'description', 'creators', 'archive.unit_id', 'archive.unit_level', 'archive.extent', 'archive.repository', 'archive.scope_content', 'archive.access_conditions', 'archive.parent_id'] %}
       {% else %}
         {% set public_fields = ['id', 'type', 'title', 'description', 'creators'] %}
       {% endif %}

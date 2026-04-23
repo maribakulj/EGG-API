@@ -123,11 +123,19 @@ _MUSEUM_MAPPING_HINTS: dict[str, tuple[str, ...]] = {
     "links.thumbnail": ("thumbnail", "image", "preview"),
 }
 _ARCHIVE_MAPPING_HINTS: dict[str, tuple[str, ...]] = {
-    "id": ("unitid", "ref_code", "id", "identifier", "_id"),
-    "type": ("level", "type", "doc_type"),
+    "id": ("unitid", "unit_id", "ref_code", "id", "identifier", "_id"),
+    "type": ("level", "unit_level", "type", "doc_type"),
     "title": ("unittitle", "title", "label"),
-    "description": ("scopecontent", "description", "abstract"),
+    "description": ("scopecontent", "scope_content", "description", "abstract"),
     "creators": ("origination", "creator", "creators", "author"),
+    # Sprint 26: archive-specific sub-block (EAD finding aids).
+    "archive.unit_id": ("unitid", "unit_id", "ref_code"),
+    "archive.unit_level": ("unit_level", "level"),
+    "archive.extent": ("extent", "physdesc", "physical_description"),
+    "archive.repository": ("repository", "holding_institution", "archive"),
+    "archive.scope_content": ("scopecontent", "scope_content", "abstract"),
+    "archive.access_conditions": ("accessrestrict", "access_conditions", "access"),
+    "archive.parent_id": ("parent_id", "parent"),
 }
 # Backwards-compat alias for callers (and the S14 test) that import
 # the original symbol name. Library is the lossless default.
