@@ -31,7 +31,7 @@ sprint — incremental delete propagation is a Sprint 27 concern.
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import Any
 from xml.etree import ElementTree as ET
@@ -41,6 +41,9 @@ import httpx
 from app.errors import AppError
 
 logger = logging.getLogger("egg.importers.oaipmh")
+
+
+RecordParser = Callable[[ET.Element, "ET.Element | None"], "dict[str, Any] | None"]
 
 
 _NS = {
@@ -242,6 +245,7 @@ def iter_records(
     client: httpx.Client | None = None,
     timeout: float = 30.0,
     max_pages: int = 10_000,
+    record_parser: RecordParser | None = None,
 ) -> Iterator[dict[str, Any]]:
     """Yield one backend document per OAI-PMH record, following
     resumption tokens.
@@ -250,7 +254,15 @@ def iter_records(
     an infinite loop of tokens will raise an ``AppError`` rather
     than ingesting forever. Each page stays in memory just long
     enough to parse and yield its records.
+
+    ``record_parser`` takes one ``(header, metadata)`` tuple and
+    returns the backend doc or ``None`` (deleted / malformed). The
+    default parser is :func:`dc_record_to_doc`; Sprint 24 passes
+    :func:`app.importers.lido.oai_record_to_doc` when the operator
+    selects ``metadataPrefix=lido``.
     """
+
+    parser: RecordParser = record_parser or dc_record_to_doc
     close_after = False
     if client is None:
         client = httpx.Client(timeout=timeout, follow_redirects=True)
@@ -282,7 +294,7 @@ def iter_records(
                 metadata = record.find("oai:metadata", _NS)
                 if header is None:
                     continue
-                doc = dc_record_to_doc(header, metadata)
+                doc = parser(header, metadata)
                 if doc is not None:
                     yield doc
 
@@ -313,6 +325,7 @@ def ingest(
     bulk_index: Any,
     chunk_size: int = DEFAULT_CHUNK_SIZE,
     client: httpx.Client | None = None,
+    record_parser: RecordParser | None = None,
 ) -> OAIImportResult:
     """Run a full harvest + bulk-index cycle.
 
@@ -333,6 +346,7 @@ def ingest(
             metadata_prefix=metadata_prefix,
             set_spec=set_spec,
             client=client,
+            record_parser=record_parser,
         ):
             chunk.append(doc)
             if len(chunk) >= chunk_size:

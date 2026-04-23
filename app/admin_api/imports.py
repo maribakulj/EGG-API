@@ -1,10 +1,10 @@
-"""Admin REST endpoints for batch importers (Sprint 22).
+"""Admin REST endpoints for batch importers.
 
-Exposes the ``import_sources`` + ``import_runs`` tables behind a
-familiar CRUD surface plus a ``POST /run`` trigger. Only OAI-PMH
-is wired in this sprint; the Pydantic models leave space for
-Sprint 24-26 importers (LIDO file, MARC, CSV, EAD) by discriminating
-on ``kind``.
+Sprint 22 shipped OAI-PMH / Dublin Core.
+Sprint 24 adds OAI-PMH / LIDO and flat-file LIDO by discriminating
+on :data:`app.importers.SUPPORTED_KINDS`. The Pydantic payload
+validates the kind on the way in so storage never sees an unknown
+value; the per-kind dispatch then lives in :mod:`app.importers`.
 """
 
 from __future__ import annotations
@@ -18,7 +18,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.auth.dependencies import require_admin_key
 from app.dependencies import container
 from app.errors import AppError
-from app.importers.oaipmh import identify as oai_identify, ingest as oai_ingest
+from app.importers import run_import
+from app.importers.oaipmh import identify as oai_identify
 
 router = APIRouter(
     prefix="/admin/v1/imports",
@@ -33,11 +34,14 @@ class _StrictModel(BaseModel):
 
 class CreateImportSourceRequest(_StrictModel):
     label: str = Field(..., min_length=1, max_length=128)
-    kind: Literal["oaipmh"] = "oaipmh"
+    # ``url`` holds the OAI-PMH base URL for ``oaipmh`` / ``oaipmh_lido``
+    # and the absolute filesystem path for ``lido_file`` — the dispatcher
+    # in :mod:`app.importers` interprets it per kind.
+    kind: Literal["oaipmh", "oaipmh_lido", "lido_file"] = "oaipmh"
     url: str = Field(..., min_length=1, max_length=2048)
     metadata_prefix: str = Field(default="oai_dc", max_length=64)
     set_spec: str | None = Field(default=None, max_length=256)
-    schema_profile: Literal["library", "museum", "archive"] = "library"
+    schema_profile: Literal["library", "museum", "archive", "custom"] = "library"
 
 
 class ImportSourceResponse(_StrictModel):
@@ -133,9 +137,13 @@ def list_runs(source_id: int, limit: int = 20) -> list[ImportRunResponse]:
 
 @router.post("/{source_id}/identify")
 def identify_endpoint(source_id: int) -> dict[str, str]:
-    """Ping the OAI-PMH endpoint without ingesting anything."""
+    """Ping the OAI-PMH endpoint without ingesting anything.
+
+    Available for both ``oaipmh`` and ``oaipmh_lido`` since both share
+    the same protocol envelope; flat-file LIDO sources return 400.
+    """
     src = container.store.get_import_source(source_id)
-    if src is None or src.kind != "oaipmh" or not src.url:
+    if src is None or src.kind not in {"oaipmh", "oaipmh_lido"} or not src.url:
         raise AppError(
             "invalid_parameter",
             "Only configured OAI-PMH sources can be identified.",
@@ -160,22 +168,24 @@ def run_source(source_id: int) -> RunResult:
             {"source_id": source_id},
             status_code=404,
         )
-    if src.kind != "oaipmh" or not src.url:
-        raise AppError(
-            "invalid_parameter",
-            f"Unsupported importer kind: {src.kind!r}",
-            {"kind": src.kind},
-            status_code=400,
-        )
 
     run_id = container.store.start_import_run(source_id)
     try:
-        result = oai_ingest(
-            url=src.url,
-            metadata_prefix=src.metadata_prefix or "oai_dc",
-            set_spec=src.set_spec,
-            bulk_index=container.adapter.bulk_index,
+        result = run_import(src, bulk_index=container.adapter.bulk_index)
+    except ValueError as exc:
+        container.store.finish_import_run(
+            run_id,
+            status="failed",
+            records_ingested=0,
+            records_failed=0,
+            error_message=str(exc),
         )
+        raise AppError(
+            "invalid_parameter",
+            str(exc),
+            {"kind": src.kind},
+            status_code=400,
+        ) from exc
     except Exception as exc:
         container.store.finish_import_run(
             run_id,

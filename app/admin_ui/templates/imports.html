@@ -11,7 +11,7 @@
 {% if error %}<p class="error">{{ error }}</p>{% endif %}
 
 <div class="panel">
-  <h3>Add an OAI-PMH source</h3>
+  <h3>Add an import source</h3>
   <form class="stack" method="post" action="/admin/ui/imports/add">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
     <label>
@@ -20,21 +20,42 @@
       <p class="help">A human-readable name. Shown in the dashboard and logs.</p>
     </label>
     <label>
-      OAI-PMH base URL
-      <input name="url" required placeholder="https://catalogue.example.org/oai" />
-      <p class="help">The endpoint that answers <code class="muted">?verb=Identify</code>.</p>
+      Importer kind
+      <select name="kind">
+        <option value="oaipmh" selected>OAI-PMH — Dublin Core (universal)</option>
+        <option value="oaipmh_lido">OAI-PMH — LIDO (museums)</option>
+        <option value="lido_file">LIDO — flat XML file on this machine</option>
+      </select>
+      <p class="help">
+        Pick the first option for any OAI-PMH catalogue (Koha, PMB, AtoM, …).
+        Pick the LIDO variants if your museum DAMS (Axiell, Micromusée, TMS, …)
+        exports LIDO. The flat-file option lets you point EGG at a one-shot
+        XML dump sitting on this server.
+      </p>
     </label>
     <label>
-      Metadata prefix
+      Endpoint URL or absolute file path
+      <input name="url" required placeholder="https://catalogue.example.org/oai" />
+      <p class="help">
+        For OAI-PMH: the base URL that answers <code class="muted">?verb=Identify</code>.
+        For the flat-file option: an absolute path readable by the server
+        (e.g. <code class="muted">/var/egg/imports/collection.xml</code>).
+      </p>
+    </label>
+    <label>
+      Metadata prefix <small>(OAI-PMH only; ignored for flat files)</small>
       <select name="metadata_prefix">
         <option value="oai_dc" selected>oai_dc (Dublin Core — universal)</option>
-        <option value="lido">lido (LIDO — museums, Sprint 24)</option>
+        <option value="lido">lido (LIDO — museums)</option>
         <option value="marcxml">marcxml (MARC — Sprint 25)</option>
       </select>
-      <p class="help">Leave on <code class="muted">oai_dc</code> unless your source exposes a richer schema.</p>
+      <p class="help">
+        Leave on <code class="muted">oai_dc</code> for the Dublin Core kind.
+        The LIDO kinds pin the prefix automatically.
+      </p>
     </label>
     <label>
-      Set (optional)
+      Set (optional, OAI-PMH only)
       <input name="set_spec" placeholder="photos:collection42" />
       <p class="help">An OAI-PMH set identifier to restrict the harvest to a subset.</p>
     </label>
@@ -44,7 +65,9 @@
         <option value="library" selected>Library</option>
         <option value="museum">Museum</option>
         <option value="archive">Archive</option>
+        <option value="custom">Custom</option>
       </select>
+      <p class="help">LIDO imports usually pair with the <em>museum</em> profile.</p>
     </label>
     <div class="actions">
       <button type="submit">Add source</button>

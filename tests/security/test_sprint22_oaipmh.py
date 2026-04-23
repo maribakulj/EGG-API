@@ -356,17 +356,16 @@ def test_imports_api_run_happy_path(
     ).json()
     source_id = created["id"]
 
-    # Stub the importer to avoid any HTTP call.
+    # Stub the dispatcher to avoid any HTTP call.
     from app.admin_api import imports as imports_mod
+    from app.importers import ImportDispatchResult
 
-    def _fake_ingest(**kwargs):
-        from app.importers.oaipmh import OAIImportResult
-
+    def _fake_run(source, *, bulk_index):
         # Use the passed-in bulk_index so we can assert it's wired.
-        kwargs["bulk_index"]([{"id": "stub-1", "title": "stub"}])
-        return OAIImportResult(ingested=1, failed=0)
+        bulk_index([{"id": "stub-1", "title": "stub"}])
+        return ImportDispatchResult(ingested=1, failed=0)
 
-    monkeypatch.setattr(imports_mod, "oai_ingest", _fake_ingest)
+    monkeypatch.setattr(imports_mod, "run_import", _fake_run)
 
     resp = client.post(f"/admin/v1/imports/{source_id}/run", headers=admin_headers)
     assert resp.status_code == 200, resp.text
@@ -389,13 +388,12 @@ def test_imports_api_run_records_failure(
     source_id = created["id"]
 
     from app.admin_api import imports as imports_mod
+    from app.importers import ImportDispatchResult
 
-    def _fake_ingest(**kwargs):
-        from app.importers.oaipmh import OAIImportResult
+    def _fake_run(source, *, bulk_index):
+        return ImportDispatchResult(ingested=0, failed=0, error="unreachable")
 
-        return OAIImportResult(ingested=0, failed=0, error="unreachable")
-
-    monkeypatch.setattr(imports_mod, "oai_ingest", _fake_ingest)
+    monkeypatch.setattr(imports_mod, "run_import", _fake_run)
     resp = client.post(f"/admin/v1/imports/{source_id}/run", headers=admin_headers)
     assert resp.status_code == 200
     body = resp.json()
@@ -423,7 +421,7 @@ def test_imports_ui_requires_login(client: TestClient) -> None:
 def test_imports_ui_renders_add_form(client: TestClient, admin_ui_session: str) -> None:
     resp = client.get("/admin/ui/imports")
     assert resp.status_code == 200
-    assert "Add an OAI-PMH source" in resp.text
+    assert "Add an import source" in resp.text
 
 
 def test_imports_ui_add_and_delete(client: TestClient, admin_ui_session: str) -> None:

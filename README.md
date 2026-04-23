@@ -425,11 +425,22 @@ Same-origin console at `/admin/*`, served by Jinja2 templates (autoescape enforc
   when ES lives on a known internal hostname. Nothing reaches
   `config/egg.yaml` until the operator clicks *Publish*; drafts are
   per-admin and survive disconnects.
-- `/admin/ui/imports` — **OAI-PMH import** (Sprint 22): connect your
+- `/admin/ui/imports` — **Data imports** (Sprint 22-24): connect your
   library, museum or archive catalogue (Koha, PMB, AtoM, Axiell,
-  MuseumPlus, CollectionSpace, …) to EGG-API and harvest records
-  into the active backend. Supports Dublin Core today; LIDO, MARC
-  and EAD come in S24-S26.
+  MuseumPlus, TMS, Micromusée, Mobydoc, CollectionSpace, …) to
+  EGG-API and harvest records into the active backend. Three
+  importer kinds are available:
+  - **OAI-PMH — Dublin Core**: universal library / archive
+    protocol, added in S22.
+  - **OAI-PMH — LIDO**: same protocol but with the LIDO museum
+    metadata prefix, added in S24. Maps straight into the museum
+    schema profile (inventory number, artist, medium, dimensions,
+    IIIF manifest, …).
+  - **LIDO — flat XML file**: one-shot dump parsed from an absolute
+    filesystem path readable by the server. Useful when the DAMS
+    refuses to expose OAI.
+
+  MARC, CSV / XLSX and EAD come in S25-S26.
 - `/admin/ui/help` — glossary of the technical terms used across the
   console, written for non-technical operators.
 - `/admin/ui/config` — editable configuration form.

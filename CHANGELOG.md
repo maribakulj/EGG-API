@@ -9,6 +9,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Sprint 24 — LIDO importer (OAI-PMH + flat-file)**: pairs the
+  Sprint 23 museum profile with a real way to load content. Museum
+  DAMS (Axiell, Micromusée, TMS, Mobydoc, …) either expose LIDO over
+  OAI-PMH or ship flat XML dumps — EGG now consumes both without a
+  heavy dependency:
+  - New `app/importers/lido.py` — stdlib-only LIDO parser that turns
+    a `<lido:lido>` element into a museum-profile backend document
+    (id, type, title, artist, inventory_number, medium, dimensions,
+    acquisition_date, current_location, iiif_manifest, thumbnail).
+    The parser prefers `lido:type="inventory number"` over other
+    `workID` entries and handles the `IIIFManifest` resource
+    representation plus a URL-suffix fallback (`…/manifest`).
+  - `parse_lido_bytes()` + `ingest_file(path, bulk_index, chunk_size)`
+    stream a flat LIDO XML file through the adapter's `bulk_index`
+    in chunks of 500. Accepts a single `<lido:lido>` root, a
+    `<lido:lidoWrap>` with many children, or any XML with descendant
+    `<lido:lido>` elements.
+  - `oaipmh.iter_records()` + `oaipmh.ingest()` now accept a
+    `record_parser` callable, so LIDO over OAI-PMH reuses the Sprint
+    22 envelope + resumption-token plumbing with one extra kwarg.
+  - New dispatcher `app.importers.run_import(source, bulk_index)`
+    owns the single `kind` → concrete-ingest mapping; both
+    `POST /admin/v1/imports/{id}/run` and
+    `POST /admin/ui/imports/{id}/run` call it.
+  - `CreateImportSourceRequest.kind` widens to
+    `Literal["oaipmh", "oaipmh_lido", "lido_file"]`;
+    `schema_profile` widens to include `"custom"`.
+  - Admin UI gets a **Importer kind** selector (OAI-PMH / OAI-PMH
+    LIDO / LIDO file). Flat-file sources reuse the `url` column to
+    store an absolute filesystem path the server can read (no
+    multipart upload in S24 to keep the desktop memory story
+    simple); the form help text spells that out.
+  - `POST /admin/v1/imports/{id}/identify` now answers for both
+    `oaipmh` and `oaipmh_lido` sources (same protocol), and still
+    400s for flat-file kinds.
+  - 27 new tests in `tests/security/test_sprint24_lido.py` cover
+    element → doc mapping (all museum fields + fallbacks), flat-file
+    parse / ingest / malformed-XML / missing-file paths, OAI
+    envelope parsing (`lido:lidoWrap`, deleted records, missing
+    metadata), dispatcher routing + guards, admin API accept/reject
+    of the new kinds, end-to-end `run` for `lido_file`, UI form
+    listing the three kinds, UI `/add` persisting a `lido_file`
+    source with empty prefix, and UI `/add` rejecting unknown kinds.
+
 - **Sprint 23 — Museum schema profile + IIIF passthrough**
   (turns EGG-API into a credible publication layer for DAMS / museum
   collection systems, not just libraries):

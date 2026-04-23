@@ -546,8 +546,11 @@ def imports_page(request: Request):
     return _render_imports(request)
 
 
-_ALLOWED_PROFILES = {"library", "museum", "archive"}
+_ALLOWED_PROFILES = {"library", "museum", "archive", "custom"}
 _ALLOWED_PREFIXES = {"oai_dc", "lido", "marcxml"}
+# Sprint 24 adds LIDO over OAI-PMH and flat-file LIDO. The set is the
+# single source of truth the template loops over.
+_ALLOWED_KINDS = {"oaipmh", "oaipmh_lido", "lido_file"}
 
 
 @router.post("/ui/imports/add", response_class=HTMLResponse)
@@ -561,23 +564,36 @@ async def imports_add(request: Request):
 
     data = await _form(request)
     label = (data.get("label") or "").strip()
+    kind = (data.get("kind") or "oaipmh").strip() or "oaipmh"
     url = (data.get("url") or "").strip()
     metadata_prefix = (data.get("metadata_prefix") or "oai_dc").strip() or "oai_dc"
     set_spec = (data.get("set_spec") or "").strip() or None
     schema_profile = (data.get("schema_profile") or "library").strip()
 
     if not label or not url:
-        return _render_imports(request, error="Label and URL are both required.", status_code=400)
+        return _render_imports(
+            request,
+            error="Label and URL or file path are both required.",
+            status_code=400,
+        )
+    if kind not in _ALLOWED_KINDS:
+        return _render_imports(request, error="Unknown importer kind.", status_code=400)
     if schema_profile not in _ALLOWED_PROFILES:
         return _render_imports(request, error="Unknown schema profile.", status_code=400)
-    if metadata_prefix not in _ALLOWED_PREFIXES:
+    # LIDO shapes pin the metadata prefix so the list stays meaningful
+    # when the operator switches kind without touching the prefix input.
+    if kind == "oaipmh_lido":
+        metadata_prefix = "lido"
+    elif kind == "lido_file":
+        metadata_prefix = ""  # Not used for flat files; kept nullable on the row.
+    elif metadata_prefix not in _ALLOWED_PREFIXES:
         return _render_imports(request, error="Unsupported metadata prefix.", status_code=400)
 
     container.store.add_import_source(
         label=label,
-        kind="oaipmh",
+        kind=kind,
         url=url,
-        metadata_prefix=metadata_prefix,
+        metadata_prefix=metadata_prefix or None,
         set_spec=set_spec,
         schema_profile=schema_profile,
     )
@@ -586,7 +602,7 @@ async def imports_add(request: Request):
 
 @router.post("/ui/imports/{source_id}/run", response_class=HTMLResponse)
 async def imports_run(request: Request, source_id: int):
-    from app.importers.oaipmh import ingest as oai_ingest
+    from app.importers import run_import
 
     guard = _require_login(request)
     if guard is not None:
@@ -596,17 +612,21 @@ async def imports_run(request: Request, source_id: int):
         return csrf_error
 
     src = container.store.get_import_source(source_id)
-    if src is None or src.kind != "oaipmh" or not src.url:
+    if src is None or not src.url:
         return _render_imports(request, error="Unknown or unsupported source.", status_code=404)
 
     run_id = container.store.start_import_run(source_id)
     try:
-        result = oai_ingest(
-            url=src.url,
-            metadata_prefix=src.metadata_prefix or "oai_dc",
-            set_spec=src.set_spec,
-            bulk_index=container.adapter.bulk_index,
+        result = run_import(src, bulk_index=container.adapter.bulk_index)
+    except ValueError as exc:
+        container.store.finish_import_run(
+            run_id,
+            status="failed",
+            records_ingested=0,
+            records_failed=0,
+            error_message=str(exc),
         )
+        return _render_imports(request, error=f"Import failed: {exc}", status_code=400)
     except Exception as exc:
         container.store.finish_import_run(
             run_id,
