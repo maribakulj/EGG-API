@@ -362,3 +362,28 @@ def public_schema(_: None = Depends(enforce_public_auth)) -> dict[str, object]:
         "allowed_sorts": list(cfg.allowed_sorts),
         "filters": sorted(container.policy.filter_params),
     }
+
+
+# ---------------------------------------------------------------------------
+# Outbound OAI-PMH provider (Sprint 27)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/oai")
+def oai_pmh_endpoint(request: Request) -> Response:
+    """OAI-PMH 2.0 provider at ``/v1/oai``.
+
+    Unauthenticated by protocol contract: aggregators (Europeana,
+    Gallica, Isidore, BASE, OpenAIRE) expect to harvest without
+    credentials. The handler lives in :mod:`app.oai_provider`; this
+    thin wrapper reconstructs the request URL for the ``<request>``
+    element and returns the XML body with the canonical content type.
+    """
+
+    from app.oai_provider import build_request_url, handle
+
+    scheme = request.url.scheme
+    host = request.headers.get("host") or request.url.netloc
+    request_url = build_request_url(scheme=scheme, host=host, path=str(request.url.path))
+    body = handle(request_url=request_url, query_params=dict(request.query_params))
+    return Response(content=body, media_type="text/xml; charset=utf-8")

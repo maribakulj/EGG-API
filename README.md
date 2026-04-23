@@ -341,6 +341,15 @@ All responses are JSON. Errors follow SPECS §19:
 | `GET /v1/suggest` | Autocomplete over a title-like field (SPECS §12.2) |
 | `GET /v1/openapi.json` | OpenAPI 3 schema |
 | `GET /v1/manifest/{id}` | 302 redirect to the record's IIIF manifest (museum profile) |
+| `GET /v1/oai` | OAI-PMH 2.0 provider (Sprint 27) |
+
+> **OAI-PMH provider (Sprint 27)** — EGG now re-exposes its own indexed
+> content as an OAI-PMH endpoint so aggregators (Europeana, Gallica,
+> Isidore, BASE, OpenAIRE, CollEx) can harvest from it. Unauthenticated
+> by protocol contract, Dublin Core (`oai_dc`) metadataPrefix, supports
+> the six verbs + resumption tokens for paging. Try
+> `GET /v1/oai?verb=Identify` or
+> `GET /v1/oai?verb=ListRecords&metadataPrefix=oai_dc`.
 
 > **IIIF passthrough (Sprint 23)** — when the museum schema profile maps
 > `links.iiif_manifest` to a backend field, `GET /v1/manifest/{id}` returns
@@ -460,6 +469,14 @@ Same-origin console at `/admin/*`, served by Jinja2 templates (autoescape enforc
   - **EAD — flat XML file** (S26): archive finding aids (EAD 2002
     or EAD3) served up as a single XML file. Same tree expansion
     as the OAI variant.
+
+  Every source can carry an optional **Run schedule** (``hourly`` /
+  ``every 6 hours`` / ``daily`` / ``weekly``; Sprint 27). A
+  background polling thread picks due sources automatically — set
+  the cadence once and EGG keeps the catalogue fresh without the
+  operator touching the button. ``EGG_SCHEDULER=off`` disables the
+  polling loop per deployment; ``EGG_SCHEDULER_TICK_SECONDS`` tunes
+  how often it polls (default ``60``).
 - `/admin/ui/help` — glossary of the technical terms used across the
   console, written for non-technical operators.
 - `/admin/ui/config` — editable configuration form.

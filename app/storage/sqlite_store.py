@@ -45,13 +45,19 @@ class UsageEvent:
 class ImportSource:
     id: int
     label: str
-    kind: str  # "oaipmh" / future: "lido_file", "marc", "csv", "ead"
+    kind: str  # "oaipmh" / "oaipmh_lido" / "oaipmh_marcxml" / "oaipmh_ead" /
+    # "lido_file" / "marc_file" / "marcxml_file" / "csv_file" / "ead_file"
     url: str | None
     metadata_prefix: str | None
     set_spec: str | None
-    schema_profile: str  # "library" / "museum" / "archive"
+    schema_profile: str  # "library" / "museum" / "archive" / "custom"
     created_at: str
     last_run_at: str | None = None
+    # Sprint 27: cron-like schedule. ``None`` / empty → manual runs only.
+    # Values: "hourly" / "6h" / "daily" / "weekly" (keep the list small
+    # so the UI stays a dropdown non-technical operators can use).
+    schedule: str | None = None
+    next_run_at: str | None = None
 
 
 @dataclass
@@ -460,7 +466,7 @@ class SQLiteStore:
             )
         return int(cur.rowcount or 0)
 
-    # -- Import sources + runs (Sprint 22) -----------------------------------
+    # -- Import sources + runs (Sprint 22 + 27) ------------------------------
     def add_import_source(
         self,
         *,
@@ -470,6 +476,8 @@ class SQLiteStore:
         metadata_prefix: str | None = None,
         set_spec: str | None = None,
         schema_profile: str = "library",
+        schedule: str | None = None,
+        next_run_at: str | None = None,
     ) -> ImportSource:
         now = datetime.now(timezone.utc).isoformat()
         with self._connect() as conn:
@@ -477,10 +485,20 @@ class SQLiteStore:
                 """
                 INSERT INTO import_sources(
                     label, kind, url, metadata_prefix, set_spec,
-                    schema_profile, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    schema_profile, created_at, schedule, next_run_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (label, kind, url, metadata_prefix, set_spec, schema_profile, now),
+                (
+                    label,
+                    kind,
+                    url,
+                    metadata_prefix,
+                    set_spec,
+                    schema_profile,
+                    now,
+                    schedule,
+                    next_run_at,
+                ),
             )
             row_id = int(cur.lastrowid or 0)
         return ImportSource(
@@ -493,6 +511,8 @@ class SQLiteStore:
             schema_profile=schema_profile,
             created_at=now,
             last_run_at=None,
+            schedule=schedule,
+            next_run_at=next_run_at,
         )
 
     def list_import_sources(self) -> list[ImportSource]:
@@ -500,7 +520,8 @@ class SQLiteStore:
             rows = conn.execute(
                 """
                 SELECT id, label, kind, url, metadata_prefix, set_spec,
-                       schema_profile, created_at, last_run_at
+                       schema_profile, created_at, last_run_at,
+                       schedule, next_run_at
                 FROM import_sources
                 ORDER BY created_at DESC
                 """
@@ -512,12 +533,47 @@ class SQLiteStore:
             row = conn.execute(
                 """
                 SELECT id, label, kind, url, metadata_prefix, set_spec,
-                       schema_profile, created_at, last_run_at
+                       schema_profile, created_at, last_run_at,
+                       schedule, next_run_at
                 FROM import_sources WHERE id = ?
                 """,
                 (int(source_id),),
             ).fetchone()
         return ImportSource(**dict(row)) if row else None
+
+    def list_due_import_sources(self, *, now: str) -> list[ImportSource]:
+        """Return sources whose ``next_run_at`` is non-null and ``<= now``."""
+
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, label, kind, url, metadata_prefix, set_spec,
+                       schema_profile, created_at, last_run_at,
+                       schedule, next_run_at
+                FROM import_sources
+                WHERE next_run_at IS NOT NULL AND next_run_at <= ?
+                ORDER BY next_run_at ASC
+                """,
+                (now,),
+            ).fetchall()
+        return [ImportSource(**dict(row)) for row in rows]
+
+    def set_import_source_schedule(
+        self,
+        source_id: int,
+        *,
+        schedule: str | None,
+        next_run_at: str | None,
+    ) -> bool:
+        """Write back a new schedule + next_run_at. Returns ``True`` if the
+        row existed."""
+
+        with self._connect() as conn:
+            cur = conn.execute(
+                "UPDATE import_sources SET schedule = ?, next_run_at = ? WHERE id = ?",
+                (schedule, next_run_at, int(source_id)),
+            )
+        return int(cur.rowcount or 0) > 0
 
     def delete_import_source(self, source_id: int) -> bool:
         with self._connect() as conn:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
 import time
 from pathlib import Path
 
@@ -99,12 +100,29 @@ async def _purge_loop() -> None:
 @contextlib.asynccontextmanager
 async def _lifespan(_: FastAPI):
     task = asyncio.create_task(_purge_loop())
+    # Sprint 27: start the import scheduler so sources with a cadence
+    # run without the operator clicking "Run now". The thread is a
+    # daemon so shutdown is atomic even if the hosting process dies
+    # mid-tick, and ``EGG_SCHEDULER=off`` lets ops turn it off per
+    # deployment (e.g. when running a read-only replica).
+    scheduler = None
+    if os.getenv("EGG_SCHEDULER", "on").strip().lower() != "off":
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler(
+            store=container.store,
+            bulk_index=container.adapter.bulk_index,
+            tick_seconds=float(os.getenv("EGG_SCHEDULER_TICK_SECONDS", "60") or 60),
+        )
+        scheduler.start()
     try:
         yield
     finally:
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task
+        if scheduler is not None:
+            scheduler.stop()
 
 
 # Hide the interactive explorers in production: they list every route

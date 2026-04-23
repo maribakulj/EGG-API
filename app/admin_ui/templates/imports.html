@@ -87,6 +87,22 @@
       </select>
       <p class="help">LIDO imports usually pair with the <em>museum</em> profile.</p>
     </label>
+    <label>
+      Run schedule
+      <select name="schedule">
+        <option value="" selected>Manual only (run via the button below)</option>
+        <option value="hourly">Every hour</option>
+        <option value="6h">Every 6 hours</option>
+        <option value="daily">Once a day</option>
+        <option value="weekly">Once a week</option>
+      </select>
+      <p class="help">
+        When set, EGG-API automatically runs the importer at the
+        chosen cadence. Leave on <em>Manual only</em> for one-off
+        catalogues; pick a cadence for live SIGB/DAMS feeds that
+        should stay fresh without the operator having to click.
+      </p>
+    </label>
     <div class="actions">
       <button type="submit">Add source</button>
     </div>
@@ -102,7 +118,8 @@
       <thead>
         <tr>
           <th>Label</th><th>Endpoint</th><th>Prefix</th><th>Set</th>
-          <th>Profile</th><th>Last run</th><th>Actions</th>
+          <th>Profile</th><th>Schedule</th><th>Last run</th><th>Next run</th>
+          <th>Actions</th>
         </tr>
       </thead>
       <tbody>
@@ -113,7 +130,9 @@
           <td>{{ src.metadata_prefix }}</td>
           <td>{{ src.set_spec or '—' }}</td>
           <td>{{ src.schema_profile }}</td>
+          <td>{{ src.schedule or 'manual' }}</td>
           <td>{{ src.last_run_at or 'never' }}</td>
+          <td>{{ src.next_run_at or '—' }}</td>
           <td>
             <form class="inline-form" method="post" action="/admin/ui/imports/{{ src.id }}/run">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />

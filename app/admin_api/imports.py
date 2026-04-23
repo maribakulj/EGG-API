@@ -55,6 +55,9 @@ class CreateImportSourceRequest(_StrictModel):
     metadata_prefix: str = Field(default="oai_dc", max_length=64)
     set_spec: str | None = Field(default=None, max_length=256)
     schema_profile: Literal["library", "museum", "archive", "custom"] = "library"
+    # Sprint 27: optional cadence for the background scheduler. ``None``
+    # means manual-only (the default and only behaviour pre-Sprint-27).
+    schedule: Literal["hourly", "6h", "daily", "weekly"] | None = None
 
 
 class ImportSourceResponse(_StrictModel):
@@ -67,6 +70,8 @@ class ImportSourceResponse(_StrictModel):
     schema_profile: str
     created_at: str
     last_run_at: str | None = None
+    schedule: str | None = None
+    next_run_at: str | None = None
 
 
 class ImportRunResponse(_StrictModel):
@@ -99,6 +104,9 @@ def list_sources() -> list[ImportSourceResponse]:
 
 @router.post("", response_model=ImportSourceResponse, status_code=201)
 def create_source(payload: CreateImportSourceRequest) -> ImportSourceResponse:
+    from app.scheduler import compute_next_run_at
+
+    next_run_at = compute_next_run_at(payload.schedule) if payload.schedule else None
     src = container.store.add_import_source(
         label=payload.label,
         kind=payload.kind,
@@ -106,6 +114,8 @@ def create_source(payload: CreateImportSourceRequest) -> ImportSourceResponse:
         metadata_prefix=payload.metadata_prefix,
         set_spec=payload.set_spec,
         schema_profile=payload.schema_profile,
+        schedule=payload.schedule,
+        next_run_at=next_run_at,
     )
     return _serialize_source(src)
 

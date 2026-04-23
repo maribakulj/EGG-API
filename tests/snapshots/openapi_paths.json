@@ -69,6 +69,7 @@
     "/v1/health",
     "/v1/livez",
     "/v1/manifest/{record_id}",
+    "/v1/oai",
     "/v1/openapi.json",
     "/v1/readyz",
     "/v1/records/{record_id}",

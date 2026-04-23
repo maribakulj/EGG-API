@@ -224,6 +224,28 @@ def _m009_import_sources_and_runs(conn: sqlite3.Connection) -> None:
     )
 
 
+def _m010_import_sources_schedule(conn: sqlite3.Connection) -> None:
+    """Sprint 27: cron-like scheduling for import sources.
+
+    ``schedule`` is an enum string (``hourly`` / ``6h`` / ``daily`` /
+    ``weekly``) or ``NULL`` for manual-only sources. ``next_run_at`` is
+    the absolute ISO timestamp the scheduler uses to pick due sources
+    without re-computing cadence on every poll. Using ``ALTER TABLE``
+    keeps the column addition idempotent even on databases that were
+    upgraded one migration at a time.
+    """
+
+    existing = {row["name"] for row in conn.execute("PRAGMA table_info(import_sources)")}
+    if "schedule" not in existing:
+        conn.execute("ALTER TABLE import_sources ADD COLUMN schedule TEXT")
+    if "next_run_at" not in existing:
+        conn.execute("ALTER TABLE import_sources ADD COLUMN next_run_at TEXT")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_import_sources_next_run "
+        "ON import_sources(next_run_at) WHERE next_run_at IS NOT NULL"
+    )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(1, "baseline", _m001_baseline),
     Migration(2, "ui_sessions_expires_at", _m002_ui_sessions_expires_at),
@@ -238,6 +260,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(7, "setup_otps", _m007_setup_otps),
     Migration(8, "ui_sessions_last_activity", _m008_ui_sessions_last_activity),
     Migration(9, "import_sources_and_runs", _m009_import_sources_and_runs),
+    Migration(10, "import_sources_schedule", _m010_import_sources_schedule),
 )
 
 

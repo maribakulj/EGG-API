@@ -9,6 +9,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Sprint 27 — Scheduler + outbound OAI-PMH provider** turns EGG-API
+  into a fully autonomous GLAM publication node: catalogues refresh
+  themselves on a cadence, and aggregators (Europeana, Gallica,
+  Isidore, BASE, OpenAIRE, CollEx) can harvest EGG's indexed content
+  over the same OAI-PMH protocol it already consumes.
+  - **Import scheduler** (`app/scheduler.py`): a single background
+    daemon thread polls ``import_sources`` every tick (default 60 s)
+    for rows with ``next_run_at <= now`` and runs them through the
+    Sprint 24 ``run_import`` dispatcher. Cadence vocabulary is
+    deliberately small (``hourly``, ``6h``, ``daily``, ``weekly``)
+    so the admin form stays a dropdown instead of a cron expression
+    field. Manual sources (no cadence) are never picked — the
+    *Run now* button keeps its full role for ad-hoc testing.
+  - Migration 10 adds ``schedule`` + ``next_run_at`` columns on
+    ``import_sources`` + a filtered index to keep the due-lookup
+    constant-time. ``SQLiteStore`` gains
+    ``list_due_import_sources`` and ``set_import_source_schedule``.
+  - FastAPI lifespan starts / stops the scheduler automatically.
+    ``EGG_SCHEDULER=off`` disables it per deployment (useful for
+    read-only replicas) and ``EGG_SCHEDULER_TICK_SECONDS`` tunes
+    the poll cadence for local development.
+  - Admin REST payload: ``CreateImportSourceRequest.schedule``
+    accepts the four allowed cadence values or ``null``.
+    ``ImportSourceResponse`` now echoes ``schedule`` + ``next_run_at``
+    so the UI dashboard can display the next firing time.
+  - Admin UI imports form grows a **Run schedule** dropdown and the
+    source table shows ``Schedule`` + ``Next run`` columns alongside
+    the existing ``Last run``.
+  - **Outbound OAI-PMH provider** (`app/oai_provider.py` +
+    ``GET /v1/oai``): implements the six OAI-PMH 2.0 verbs
+    (``Identify``, ``ListMetadataFormats``, ``ListSets``,
+    ``ListIdentifiers``, ``ListRecords``, ``GetRecord``) with Dublin
+    Core (``oai_dc``) as the mandatory metadataPrefix. Harvester
+    pagination uses **opaque base64-encoded resumption tokens** that
+    wrap the adapter cursor + metadata prefix — no server state,
+    harvesters survive process restarts. All verb-level errors
+    follow OAI-PMH §3.6 (``badVerb``, ``badArgument``,
+    ``cannotDisseminateFormat``, ``idDoesNotExist``,
+    ``noRecordsMatch``, ``noSetHierarchy``, ``badResumptionToken``)
+    and live inside the envelope with HTTP 200 so legacy harvesters
+    parse cleanly.
+  - The endpoint is unauthenticated by protocol contract; no API
+    key is ever required and no admin state is touched. OAI
+    identifiers follow the spec syntax ``oai:<repository-id>:<local>``
+    — the repository id is derived from ``AppConfig.repository_id``
+    or ``public_base_url`` host, defaulting to ``egg-api``.
+  - OpenAPI snapshot grows ``/v1/oai``.
+  - 24 new tests in ``tests/security/test_sprint27_scheduler_oai.py``
+    cover: cadence math for all four values + the invalid case;
+    ``list_due_import_sources`` and ``set_import_source_schedule``
+    semantics; scheduler end-to-end (runs due sources, skips manual,
+    reschedules on success *and* on exception, start/stop
+    idempotent); admin REST + UI acceptance of ``schedule`` +
+    rejection of unknown values; all six OAI-PMH verbs, Dublin
+    Core serialisation (with XML-escaping of ``&`` / ``<`` / ``>``),
+    resumption-token round-trip, ``badVerb`` / ``badArgument`` /
+    ``cannotDisseminateFormat`` / ``idDoesNotExist`` /
+    ``noSetHierarchy`` / ``badResumptionToken`` / ``noRecordsMatch``.
+
 - **Sprint 26 — EAD importer (archive finding aids)** closes the
   last big gap in the GLAM publication story. Archives that run
   AtoM, Mnesys, Ligeo, ArchivesSpace, Calames, PLEADE or Pict'oOpen

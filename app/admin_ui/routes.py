@@ -563,6 +563,7 @@ _ALLOWED_KINDS = {
     "ead_file",
 }
 _MARC_FLAVORS = {"marc21", "unimarc"}
+_ALLOWED_SCHEDULES = {"hourly", "6h", "daily", "weekly"}
 
 
 @router.post("/ui/imports/add", response_class=HTMLResponse)
@@ -617,6 +618,15 @@ async def imports_add(request: Request):
     elif metadata_prefix not in _ALLOWED_PREFIXES:
         return _render_imports(request, error="Unsupported metadata prefix.", status_code=400)
 
+    schedule = (data.get("schedule") or "").strip() or None
+    if schedule is not None and schedule not in _ALLOWED_SCHEDULES:
+        return _render_imports(request, error="Unknown schedule cadence.", status_code=400)
+    next_run_at: str | None = None
+    if schedule is not None:
+        from app.scheduler import compute_next_run_at
+
+        next_run_at = compute_next_run_at(schedule)
+
     container.store.add_import_source(
         label=label,
         kind=kind,
@@ -624,6 +634,8 @@ async def imports_add(request: Request):
         metadata_prefix=metadata_prefix or None,
         set_spec=set_spec,
         schema_profile=schema_profile,
+        schedule=schedule,
+        next_run_at=next_run_at,
     )
     return _render_imports(request, message=f"Added source: {label}")
 
