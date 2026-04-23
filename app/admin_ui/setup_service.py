@@ -94,12 +94,50 @@ EXPOSURE_CATALOG: dict[str, tuple[str, ...]] = {
 # Heuristic: EGG public field → ordered list of backend field-name hints.
 # First match wins. Used by :func:`propose_mapping` to pre-populate the
 # mapping screen so operators rarely have to edit manually.
-_MAPPING_HINTS: dict[str, tuple[str, ...]] = {
+#
+# Sprint 23: separate dictionaries per ``schema_profile`` so a museum
+# deployment gets ``inventory_number`` / ``medium`` / ``dimensions``
+# pre-filled from common backend column names, while a library keeps
+# the lean default. ``custom`` returns nothing — the operator wants
+# manual control.
+_LIBRARY_MAPPING_HINTS: dict[str, tuple[str, ...]] = {
     "id": ("id", "identifier", "_id"),
     "type": ("type", "record_type", "doc_type"),
     "title": ("title", "name", "label", "dc_title"),
     "description": ("description", "abstract", "summary", "dc_description"),
     "creators": ("creator_csv", "creators", "creator", "author", "dc_creator"),
+}
+_MUSEUM_MAPPING_HINTS: dict[str, tuple[str, ...]] = {
+    "id": ("inventory_no", "inventory_number", "object_id", "id", "identifier", "_id"),
+    "type": ("object_type", "objectworktype", "type", "doc_type"),
+    "title": ("title", "object_name", "appellation", "label"),
+    "description": ("description", "object_description", "summary"),
+    "creators": ("artist", "maker", "creator", "creators", "author"),
+    "museum.inventory_number": ("inventory_no", "inventory_number", "accession_no"),
+    "museum.artist": ("artist", "maker"),
+    "museum.medium": ("medium", "materials_techniques", "support"),
+    "museum.dimensions": ("dimensions", "measurements", "size"),
+    "museum.acquisition_date": ("acquisition_date", "acquired", "date_acquired"),
+    "museum.current_location": ("current_location", "location", "venue"),
+    "links.iiif_manifest": ("iiif_manifest", "iiif", "manifest_url", "manifest"),
+    "links.thumbnail": ("thumbnail", "image", "preview"),
+}
+_ARCHIVE_MAPPING_HINTS: dict[str, tuple[str, ...]] = {
+    "id": ("unitid", "ref_code", "id", "identifier", "_id"),
+    "type": ("level", "type", "doc_type"),
+    "title": ("unittitle", "title", "label"),
+    "description": ("scopecontent", "description", "abstract"),
+    "creators": ("origination", "creator", "creators", "author"),
+}
+# Backwards-compat alias for callers (and the S14 test) that import
+# the original symbol name. Library is the lossless default.
+_MAPPING_HINTS = _LIBRARY_MAPPING_HINTS
+
+_HINTS_BY_PROFILE: dict[str, dict[str, tuple[str, ...]]] = {
+    "library": _LIBRARY_MAPPING_HINTS,
+    "museum": _MUSEUM_MAPPING_HINTS,
+    "archive": _ARCHIVE_MAPPING_HINTS,
+    "custom": {},
 }
 
 
@@ -128,6 +166,11 @@ class SetupDraft:
     # so the draft row stays small even on wide indices.
     available_fields: dict[str, str] = field(default_factory=dict)
     mapping: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # Sprint 23: schema-shape pivot. Drives the wizard's mapping
+    # heuristic + which optional Record sub-blocks the publish step
+    # exposes (museum / archive). Defaults to "library" so existing
+    # drafts keep working.
+    schema_profile: str = "library"
     # Sprint 15 additions.
     security_profile: str = "prudent"
     public_mode: str = "anonymous_allowed"
@@ -149,6 +192,7 @@ class SetupDraft:
             "available_indices": list(self.available_indices),
             "available_fields": dict(self.available_fields),
             "mapping": {k: dict(v) for k, v in self.mapping.items()},
+            "schema_profile": self.schema_profile,
             "security_profile": self.security_profile,
             "public_mode": self.public_mode,
             "exposure": {k: list(v) for k, v in self.exposure.items()},
@@ -170,6 +214,7 @@ class SetupDraft:
             available_indices=list(payload.get("available_indices") or []),
             available_fields=dict(payload.get("available_fields") or {}),
             mapping={k: dict(v) for k, v in (payload.get("mapping") or {}).items()},
+            schema_profile=str(payload.get("schema_profile") or "library"),
             security_profile=str(payload.get("security_profile") or "prudent"),
             public_mode=str(payload.get("public_mode") or "anonymous_allowed"),
             exposure=exposure,
@@ -327,6 +372,7 @@ def draft_to_config(draft: SetupDraft, *, preserve: AppConfig | None = None) -> 
             "auth": (draft.backend or {}).get("auth") or {"mode": "none"},
         },
         "storage": {"sqlite_path": preserve.storage.sqlite_path},
+        "schema_profile": (draft.schema_profile or preserve.schema_profile),
         "security_profile": draft.security_profile or preserve.security_profile,
         "profiles": {name: prof.model_dump() for name, prof in preserve.profiles.items()},
         "auth": {
@@ -384,18 +430,25 @@ def run_probe_search(adapter: BackendAdapter, query: str) -> dict[str, Any]:
     return {"query": query, "total": total, "samples": samples}
 
 
-def propose_mapping(available_fields: dict[str, str]) -> dict[str, dict[str, Any]]:
+def propose_mapping(
+    available_fields: dict[str, str],
+    *,
+    profile: str = "library",
+) -> dict[str, dict[str, Any]]:
     """Heuristic default mapping from a flat field map.
 
     Returns the same shape the admin config expects (``{public_name:
-    FieldMapping-dict}``). Only fills in the five canonical EGG fields;
-    operators can add more on the mapping screen itself (Sprint 15).
+    FieldMapping-dict}``). The hint table is selected by ``profile``
+    (Sprint 23), so a museum deployment automatically gets
+    ``museum.inventory_number`` / ``museum.medium`` / ``links.iiif_manifest``
+    pre-filled when the source carries the conventional column names.
     """
+    hints = _HINTS_BY_PROFILE.get(profile, _LIBRARY_MAPPING_HINTS)
     proposal: dict[str, dict[str, Any]] = {}
     lower_map = {name.lower(): name for name in available_fields}
-    for public_name, hints in _MAPPING_HINTS.items():
+    for public_name, candidates in hints.items():
         chosen: str | None = None
-        for hint in hints:
+        for hint in candidates:
             hit = lower_map.get(hint.lower())
             if hit is not None:
                 chosen = hit

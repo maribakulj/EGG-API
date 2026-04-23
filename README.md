@@ -195,6 +195,7 @@ Config lives in a single YAML file (default: `config/egg.yaml`). A fully annotat
 ```yaml
 backend:          # Where to talk to the search engine
 storage:          # Where the SQLite state DB lives
+schema_profile:   # library | museum | archive | custom (default: library)
 security_profile: # Name of the profile applied to public requests
 profiles:         # Declared profiles (prudent, standard, your-own…)
 auth:             # Admin bootstrap, cookie hardening, session TTL
@@ -206,6 +207,17 @@ allowed_facets:   # Facet allowlist
 allowed_include_fields:  # Fields that may appear in include_fields
 mapping:          # Public field → backend source rules
 ```
+
+The `schema_profile` knob (Sprint 23) widens the public Record shape:
+`museum` adds a `museum: { inventory_number, artist, medium, dimensions,
+acquisition_date, current_location }` sub-block and enables the IIIF
+passthrough at `/v1/manifest/{id}` when `links.iiif_manifest` is mapped.
+`library` and `archive` keep the lean shape (`id, type, title, description,
+creators`). `custom` disables the auto-suggest hints in the wizard for
+operators who want to drive everything by hand. Mapping keys may use a
+dotted form (`museum.inventory_number`, `links.iiif_manifest`) to feed the
+new sub-blocks; an empty sub-block is dropped from the response so a
+library deployment never sees a stray `museum: {}`.
 
 ### Security profile
 
@@ -321,10 +333,15 @@ All responses are JSON. Errors follow SPECS §19:
 | `GET /v1/schema` | Active public schema + allowlists |
 | `GET /v1/suggest` | Autocomplete over a title-like field (SPECS §12.2) |
 | `GET /v1/openapi.json` | OpenAPI 3 schema |
+| `GET /v1/manifest/{id}` | 302 redirect to the record's IIIF manifest (museum profile) |
 
-> **Note** — `GET /v1/manifest/{id}` (SPECS §12.3) was retired in v1.0.0:
-> IIIF manifests should be surfaced through a mapped field on the record
-> (e.g. `links.iiif_manifest`) rather than proxied. The route returns `404`.
+> **IIIF passthrough (Sprint 23)** — when the museum schema profile maps
+> `links.iiif_manifest` to a backend field, `GET /v1/manifest/{id}` returns
+> a `302` redirect to the upstream manifest URL the institution already
+> hosts. EGG-API never proxies, parses or re-serves the manifest itself,
+> so it stays out of the IIIF hosting business while keeping the
+> `/v1/manifest/{id}` URI shape that IIIF clients expect. Returns `404`
+> when the record is missing or has no manifest URL.
 
 ### Example — search
 
@@ -546,10 +563,13 @@ EGG-API/
 - HTTP response caching with ETag / 304; JSON-LD and CSV output flavours.
 - Rate limiting (in-memory by default, Redis opt-in).
 
-### Retired in v1.0.0
+### Retired in v1.0.0, restored in Sprint 23
 
-- `GET /v1/manifest/{id}` — superseded by mapping IIIF links as a record field.
-  See CHANGELOG.
+- `GET /v1/manifest/{id}` was retired in v1.0.0 and **restored in
+  Sprint 23** as a thin `302` redirect (not a proxy) to the record's
+  `links.iiif_manifest` value. Available when the deployment uses the
+  `museum` schema profile and maps a manifest URL on the backend
+  record. See CHANGELOG.
 
 ### Out of scope for V1
 

@@ -21,6 +21,12 @@ backend:
 storage:
   sqlite_path: data/egg_state.sqlite3
 
+# Sprint 23: shape of the public Record. Change to ``museum`` to expose
+# the museum sub-block (inventory number, artist, medium, dimensions,
+# acquisition date, current location) and enable the IIIF passthrough at
+# ``/v1/manifest/{id}`` when ``links.iiif_manifest`` is mapped.
+schema_profile: library  # library | museum | archive | custom
+
 security_profile: prudent
 profiles:
   prudent:

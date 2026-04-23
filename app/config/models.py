@@ -27,6 +27,11 @@ MappingMode = Literal[
 ]
 BackendType = Literal["elasticsearch", "opensearch"]
 BackendAuthMode = Literal["none", "basic", "bearer", "api_key"]
+# Sprint 23: deployment shape hint. Pivots default mappings, wizard
+# hints, and which optional Record sub-blocks (museum) the mapper
+# may populate. ``custom`` means "operator knows what they're doing,
+# don't apply any heuristic".
+SchemaProfile = Literal["library", "museum", "archive", "custom"]
 
 
 # Reject typos and stale fields everywhere in the config tree.  Silently
@@ -207,6 +212,10 @@ class AppConfig(BaseModel):
 
     backend: BackendConfig = Field(default_factory=BackendConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
+    # Sprint 23: selects the default mapping heuristic and which
+    # optional sub-blocks of Record the mapper is allowed to populate.
+    # "library" keeps the pre-S23 behaviour.
+    schema_profile: SchemaProfile = "library"
     security_profile: str = "prudent"
     profiles: dict[str, SecurityProfile] = Field(
         default_factory=lambda: {
@@ -262,6 +271,11 @@ class AppConfig(BaseModel):
         # explicitly declared in the mapping block — otherwise the API surface
         # references a field the mapper will always return None for.
         mapped_fields = _STRUCTURAL_FIELDS | set(self.mapping.keys())
+        # Sprint 23: dotted mapping keys ("museum.inventory_number")
+        # expose their head ("museum") to allowed_include_fields so the
+        # operator can list "museum" as a top-level include without
+        # tripping the cross-validator.
+        mapped_fields |= {k.split(".", 1)[0] for k in self.mapping if "." in k}
         unmapped = [f for f in self.allowed_include_fields if f not in mapped_fields]
         if unmapped:
             raise ValueError(

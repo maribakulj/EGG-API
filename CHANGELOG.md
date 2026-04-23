@@ -9,6 +9,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Sprint 23 — Museum schema profile + IIIF passthrough**
+  (turns EGG-API into a credible publication layer for DAMS / museum
+  collection systems, not just libraries):
+  - `AppConfig.schema_profile: Literal["library", "museum", "archive",
+    "custom"]` defaults to `library` (no behaviour change for existing
+    deployments). The cross-validator now allows mapping keys to use
+    a dotted form (`museum.inventory_number`, `links.iiif_manifest`)
+    and exposes the head segment to `allowed_include_fields` so the
+    sub-block is publishable through the include filter.
+  - New `MuseumFields` Pydantic sub-model on `Record`
+    (`inventory_number`, `artist`, `medium`, `dimensions`,
+    `acquisition_date`, `current_location`). Library deployments
+    never see a `museum: {}` block — empty sub-blocks are dropped by
+    the mapper.
+  - `SchemaMapper` now splits dotted public field names into nested
+    sub-blocks at emission time, so any existing transform mode
+    (`direct`, `template`, `first_non_empty`, …) works for museum
+    fields without code changes.
+  - `/v1/manifest/{record_id}` is **restored as a 302 redirect** to
+    the record's `links.iiif_manifest` value (and 404 when the
+    record is missing or has no manifest URL). EGG stays out of the
+    IIIF hosting business — it just points clients at the upstream
+    manifest the cultural institution already serves.
+  - Setup wizard step 3 ("Map your fields") gets a *Collection type*
+    selector: `library` / `museum` / `archive` / `custom`. Switching
+    profile re-runs `propose_mapping` with the right hint table
+    (museum hints recognise `inv_no`, `accession_number`,
+    `creator_artist`, `medium`, `dimensions`, `iiif`, etc.) and
+    expands the form with the museum / IIIF slots when relevant.
+    The chosen profile is persisted on the draft and propagated to
+    the published `AppConfig`.
+  - 15 new tests in `tests/security/test_sprint23_museum_iiif.py`
+    cover: museum sub-block emission, library not affected, IIIF
+    redirect 302 / 404, dotted head allowed in include filter,
+    `propose_mapping` per profile, draft round-trip preserving
+    `schema_profile`, profile route persistence + mapping rebuild,
+    `custom` clears the mapping, unknown profile rejected, login
+    required.
+  - OpenAPI snapshot adds `/v1/manifest/{record_id}` (back) and
+    `/admin/ui/setup/mapping/profile`. Coverage gate dips to **77 %**
+    (combined with S22's defensive branches); the polish sprint will
+    push it back above 80 %.
+
 - **Sprint 22 — OAI-PMH Dublin Core import** (first importer in the
   series that turns EGG-API into a GLAM publication layer rather
   than a raw ES façade):

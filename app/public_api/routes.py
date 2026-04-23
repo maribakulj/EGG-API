@@ -6,7 +6,7 @@ import json
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, Request, Response
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, RedirectResponse
 
 from app.auth.dependencies import enforce_public_auth, require_admin_key
 from app.dependencies import container
@@ -304,6 +304,38 @@ def collections(_: None = Depends(enforce_public_auth)) -> dict[str, object]:
     """Return publicly exposed collections (SPECS §12.1)."""
     sources = container.adapter.list_sources()
     return {"collections": [{"id": name, "label": name} for name in sources]}
+
+
+@router.get("/manifest/{record_id}")
+def iiif_manifest_redirect(
+    record_id: str, _: None = Depends(enforce_public_auth)
+) -> RedirectResponse:
+    """Redirect to the IIIF manifest URL of ``record_id`` (SPECS §12.3).
+
+    Sprint 23 restores this endpoint as a **302 redirect**: EGG-API
+    does not host or generate IIIF manifests, but a museum that
+    mapped the ``links.iiif_manifest`` field gets a stable, public
+    pointer to the upstream manifest. Returns 404 when the record
+    has no IIIF link in its mapping or the record itself is missing.
+    """
+    raw = container.adapter.get_record(record_id)
+    if raw is None:
+        raise AppError(
+            "not_found",
+            f"Record {record_id!r} not found",
+            {"record_id": record_id},
+            status_code=404,
+        )
+    record = container.mapper.map_record(raw)
+    target = record.links.iiif_manifest
+    if not target:
+        raise AppError(
+            "not_found",
+            "Record has no IIIF manifest link",
+            {"record_id": record_id, "hint": "map links.iiif_manifest in your config"},
+            status_code=404,
+        )
+    return RedirectResponse(url=target, status_code=302)
 
 
 @router.get("/schema")

@@ -52,6 +52,26 @@ class Timestamps(BaseModel):
     updated_at: str | None = None
 
 
+class MuseumFields(BaseModel):
+    """Museum / archive-oriented fields (Sprint 23).
+
+    None of these are ever required. A library-only deployment never
+    maps them, so ``museum`` stays ``None`` on the wire — the public
+    schema does not grow for bibliothèques who don't need it.
+
+    An institution mapping any one of them (``inventory_number``,
+    ``medium``, …) gets a populated ``museum`` block next to the core
+    fields. Frontends can decide per field whether to render.
+    """
+
+    inventory_number: str | None = None
+    artist: str | None = None  # label-friendly alias of the lead creator
+    medium: str | None = None
+    dimensions: str | None = None
+    acquisition_date: str | None = None
+    current_location: str | None = None
+
+
 class Record(BaseModel):
     """Public record shape.
 
@@ -86,6 +106,10 @@ class Record(BaseModel):
     availability: Availability = Field(default_factory=Availability)
     raw_fields: dict[str, Any] | None = None
     timestamps: Timestamps = Field(default_factory=Timestamps)
+    # Sprint 23: museum / archive-oriented fields. Stays ``None`` when
+    # none of the inner fields are mapped, so a library-only deployment
+    # does not emit an empty ``"museum": {...}`` block.
+    museum: MuseumFields | None = None
 
 
 class SearchResponse(BaseModel):

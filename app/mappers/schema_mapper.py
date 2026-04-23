@@ -145,8 +145,27 @@ class SchemaMapper:
 
     def map_record(self, doc: dict[str, Any]) -> Record:
         mapped: dict[str, Any] = {}
+        # Sprint 23: mapping rules whose public name is dotted
+        # (e.g. ``museum.inventory_number``, ``links.iiif_manifest``)
+        # feed a nested sub-object on the ``Record`` shape. Plain
+        # field names keep their S22 behaviour untouched.
+        nested: dict[str, dict[str, Any]] = {}
         for public_field, rule in self.config.mapping.items():
-            mapped[public_field] = self._apply_mode(rule.mode, rule.model_dump(), doc)
+            value = self._apply_mode(rule.mode, rule.model_dump(), doc)
+            if "." in public_field:
+                head, _, tail = public_field.partition(".")
+                nested.setdefault(head, {})[tail] = value
+            else:
+                mapped[public_field] = value
+
+        # Merge nested dicts into ``mapped`` — but only if at least
+        # one key inside carries a non-empty value. That keeps the
+        # public JSON clean: a library deployment that did not map
+        # any ``museum.*`` slot does not get a blank ``museum`` block.
+        for head, block in nested.items():
+            filtered = {k: v for k, v in block.items() if v not in (None, "", [])}
+            if filtered:
+                mapped[head] = filtered
 
         # `setdefault` does NOT overwrite an explicit None that a mapping rule
         # produced when the configured source was absent. Guard both structural

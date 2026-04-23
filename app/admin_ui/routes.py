@@ -1008,7 +1008,9 @@ async def setup_source_submit(request: Request):
     # Pre-fill a mapping proposal once we land on step 3 — only when the
     # operator hasn't started editing one yet.
     if not draft.mapping and draft.available_fields:
-        draft.mapping = propose_mapping(draft.available_fields)
+        draft.mapping = propose_mapping(
+            draft.available_fields, profile=draft.schema_profile or "library"
+        )
     svc.save(key_id, draft, "mapping")
     return RedirectResponse("/admin/ui/setup/mapping", status_code=303)
 
@@ -1025,12 +1027,59 @@ def setup_mapping_page(request: Request):
     if not draft.source.get("index"):
         return RedirectResponse("/admin/ui/setup/source", status_code=303)
     if not draft.mapping and draft.available_fields:
-        draft.mapping = propose_mapping(draft.available_fields)
+        draft.mapping = propose_mapping(
+            draft.available_fields, profile=draft.schema_profile or "library"
+        )
         _setup_service().save(key_id, draft, "mapping")
     return _render_wizard(request, "setup/mapping.html", draft=draft, current_step="mapping")
 
 
 _PUBLIC_MAPPING_FIELDS: tuple[str, ...] = ("id", "type", "title", "description", "creators")
+_MUSEUM_MAPPING_FIELDS: tuple[str, ...] = (
+    "museum.inventory_number",
+    "museum.artist",
+    "museum.medium",
+    "museum.dimensions",
+    "museum.acquisition_date",
+    "museum.current_location",
+    "links.iiif_manifest",
+    "links.thumbnail",
+)
+_ALLOWED_SCHEMA_PROFILES: frozenset[str] = frozenset({"library", "museum", "archive", "custom"})
+
+
+@router.post("/ui/setup/mapping/profile", response_class=HTMLResponse)
+async def setup_mapping_profile(request: Request):
+    """Swap the draft's schema_profile and rebuild the heuristic mapping.
+
+    Sprint 23 lets the operator pick ``library`` / ``museum`` /
+    ``archive`` / ``custom`` on the mapping screen. The switch
+    wipes the current proposal, re-runs :func:`propose_mapping`
+    against the backend's scanned fields and falls back to an
+    empty mapping for ``custom`` (where the operator wants full
+    manual control).
+    """
+    key_id, redirect = _require_login_key_id(request)
+    if redirect is not None:
+        return redirect
+    csrf_error = await _enforce_csrf(request)
+    if csrf_error is not None:
+        return csrf_error
+
+    data = await _form(request)
+    profile = (data.get("schema_profile") or "library").strip()
+    if profile not in _ALLOWED_SCHEMA_PROFILES:
+        profile = "library"
+
+    svc = _setup_service()
+    draft, _ = svc.load(key_id)
+    draft.schema_profile = profile
+    if profile == "custom":
+        draft.mapping = {}
+    elif draft.available_fields:
+        draft.mapping = propose_mapping(draft.available_fields, profile=profile)
+    svc.save(key_id, draft, "mapping")
+    return RedirectResponse("/admin/ui/setup/mapping", status_code=303)
 
 
 @router.post("/ui/setup/mapping", response_class=HTMLResponse)
@@ -1048,8 +1097,13 @@ async def setup_mapping_submit(request: Request):
     if not draft.source.get("index"):
         return RedirectResponse("/admin/ui/setup/source", status_code=303)
 
+    # Fields offered to the operator depend on the active profile.
+    profile = draft.schema_profile or "library"
+    public_fields: tuple[str, ...] = _PUBLIC_MAPPING_FIELDS
+    if profile == "museum":
+        public_fields = _PUBLIC_MAPPING_FIELDS + _MUSEUM_MAPPING_FIELDS
     new_mapping: dict[str, dict[str, object]] = {}
-    for public in _PUBLIC_MAPPING_FIELDS:
+    for public in public_fields:
         source = (data.get(f"source__{public}") or "").strip()
         mode = (data.get(f"mode__{public}") or "direct").strip() or "direct"
         if not source:
