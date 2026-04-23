@@ -548,9 +548,19 @@ def imports_page(request: Request):
 
 _ALLOWED_PROFILES = {"library", "museum", "archive", "custom"}
 _ALLOWED_PREFIXES = {"oai_dc", "lido", "marcxml"}
-# Sprint 24 adds LIDO over OAI-PMH and flat-file LIDO. The set is the
+# Sprint 24 adds LIDO over OAI-PMH and flat-file LIDO; Sprint 25 adds
+# MARC (ISO 2709), MARCXML, MARCXML-over-OAI and CSV. The set is the
 # single source of truth the template loops over.
-_ALLOWED_KINDS = {"oaipmh", "oaipmh_lido", "lido_file"}
+_ALLOWED_KINDS = {
+    "oaipmh",
+    "oaipmh_lido",
+    "oaipmh_marcxml",
+    "lido_file",
+    "marc_file",
+    "marcxml_file",
+    "csv_file",
+}
+_MARC_FLAVORS = {"marc21", "unimarc"}
 
 
 @router.post("/ui/imports/add", response_class=HTMLResponse)
@@ -580,12 +590,26 @@ async def imports_add(request: Request):
         return _render_imports(request, error="Unknown importer kind.", status_code=400)
     if schema_profile not in _ALLOWED_PROFILES:
         return _render_imports(request, error="Unknown schema profile.", status_code=400)
-    # LIDO shapes pin the metadata prefix so the list stays meaningful
-    # when the operator switches kind without touching the prefix input.
+    # Per-kind handling of ``metadata_prefix``. For OAI-PMH kinds it
+    # carries the OAI metadataPrefix; for MARC flat files it carries
+    # the flavor (marc21 / unimarc); for LIDO / CSV flat files the
+    # column is ignored by the dispatcher.
+    flavor_hint = (data.get("marc_flavor") or "marc21").strip()
     if kind == "oaipmh_lido":
         metadata_prefix = "lido"
-    elif kind == "lido_file":
-        metadata_prefix = ""  # Not used for flat files; kept nullable on the row.
+    elif kind == "oaipmh_marcxml":
+        # Store the flavor on the row so the dispatcher knows how to
+        # interpret the MARCXML tags; the OAI prefix is pinned to
+        # "marcxml" by the dispatcher itself.
+        if flavor_hint not in _MARC_FLAVORS:
+            return _render_imports(request, error="Unknown MARC flavor.", status_code=400)
+        metadata_prefix = flavor_hint
+    elif kind in {"marc_file", "marcxml_file"}:
+        if flavor_hint not in _MARC_FLAVORS:
+            return _render_imports(request, error="Unknown MARC flavor.", status_code=400)
+        metadata_prefix = flavor_hint
+    elif kind in {"lido_file", "csv_file"}:
+        metadata_prefix = ""
     elif metadata_prefix not in _ALLOWED_PREFIXES:
         return _render_imports(request, error="Unsupported metadata prefix.", status_code=400)
 

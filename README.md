@@ -425,22 +425,29 @@ Same-origin console at `/admin/*`, served by Jinja2 templates (autoescape enforc
   when ES lives on a known internal hostname. Nothing reaches
   `config/egg.yaml` until the operator clicks *Publish*; drafts are
   per-admin and survive disconnects.
-- `/admin/ui/imports` — **Data imports** (Sprint 22-24): connect your
+- `/admin/ui/imports` — **Data imports** (Sprint 22-25): connect your
   library, museum or archive catalogue (Koha, PMB, AtoM, Axiell,
-  MuseumPlus, TMS, Micromusée, Mobydoc, CollectionSpace, …) to
-  EGG-API and harvest records into the active backend. Three
-  importer kinds are available:
-  - **OAI-PMH — Dublin Core**: universal library / archive
-    protocol, added in S22.
-  - **OAI-PMH — LIDO**: same protocol but with the LIDO museum
-    metadata prefix, added in S24. Maps straight into the museum
-    schema profile (inventory number, artist, medium, dimensions,
-    IIIF manifest, …).
-  - **LIDO — flat XML file**: one-shot dump parsed from an absolute
-    filesystem path readable by the server. Useful when the DAMS
-    refuses to expose OAI.
+  MuseumPlus, TMS, Micromusée, Mobydoc, CollectionSpace, Orphée,
+  Aleph, Symphony, …) to EGG-API and harvest records into the active
+  backend. Seven importer kinds are available:
+  - **OAI-PMH — Dublin Core** (S22): universal SIGB/OAI protocol.
+  - **OAI-PMH — LIDO** (S24): same protocol with the LIDO museum
+    metadata prefix. Maps into the museum schema profile.
+  - **OAI-PMH — MARCXML** (S25): for catalogues that expose
+    MARCXML over OAI (typical of Aleph / Symphony / Koha). Flavor
+    (MARC21 / UNIMARC) chosen per source.
+  - **LIDO — flat XML file** (S24): absolute filesystem path, no
+    OAI envelope.
+  - **MARC — binary `.mrc` (ISO 2709)** (S25): the raw MARC
+    export format. Supports MARC21 and UNIMARC flavors without
+    `pymarc` — the parser is stdlib-only.
+  - **MARCXML — flat XML file** (S25): MARCXML without OAI.
+  - **CSV — flat spreadsheet** (S25): save from Excel /
+    LibreOffice as UTF-8 CSV, name one column `id`, EGG ingests.
+    Semicolon, tab and comma dialects are all sniffed; plural
+    columns (`creators`, `subject`, …) accept the `|` separator.
 
-  MARC, CSV / XLSX and EAD come in S25-S26.
+  EAD (archive finding aids) comes in S26.
 - `/admin/ui/help` — glossary of the technical terms used across the
   console, written for non-technical operators.
 - `/admin/ui/config` — editable configuration form.

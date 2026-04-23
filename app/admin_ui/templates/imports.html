@@ -22,15 +22,21 @@
     <label>
       Importer kind
       <select name="kind">
-        <option value="oaipmh" selected>OAI-PMH — Dublin Core (universal)</option>
+        <option value="oaipmh" selected>OAI-PMH — Dublin Core (universal SIGB/OAI)</option>
         <option value="oaipmh_lido">OAI-PMH — LIDO (museums)</option>
+        <option value="oaipmh_marcxml">OAI-PMH — MARCXML (Koha, Aleph, Symphony…)</option>
         <option value="lido_file">LIDO — flat XML file on this machine</option>
+        <option value="marc_file">MARC — binary .mrc (ISO 2709)</option>
+        <option value="marcxml_file">MARCXML — flat XML file</option>
+        <option value="csv_file">CSV — flat spreadsheet (header-named columns)</option>
       </select>
       <p class="help">
-        Pick the first option for any OAI-PMH catalogue (Koha, PMB, AtoM, …).
-        Pick the LIDO variants if your museum DAMS (Axiell, Micromusée, TMS, …)
-        exports LIDO. The flat-file option lets you point EGG at a one-shot
-        XML dump sitting on this server.
+        Pick OAI-PMH — Dublin Core for any SIGB / catalogue with OAI.
+        Pick the LIDO variants for museum DAMS (Axiell, Micromusée, TMS, Mobydoc).
+        Pick MARC / MARCXML for libraries that export their catalogue as MARC
+        files (Koha, PMB, Orphée, Aleph, Symphony). Pick CSV when your
+        software only exports spreadsheets — save as UTF-8 CSV with an
+        <code class="muted">id</code> column.
       </p>
     </label>
     <label>
@@ -38,21 +44,30 @@
       <input name="url" required placeholder="https://catalogue.example.org/oai" />
       <p class="help">
         For OAI-PMH: the base URL that answers <code class="muted">?verb=Identify</code>.
-        For the flat-file option: an absolute path readable by the server
-        (e.g. <code class="muted">/var/egg/imports/collection.xml</code>).
+        For the flat-file options: an absolute path readable by the server
+        (e.g. <code class="muted">/var/egg/imports/catalogue.mrc</code>).
       </p>
     </label>
     <label>
-      Metadata prefix <small>(OAI-PMH only; ignored for flat files)</small>
+      Metadata prefix <small>(OAI-PMH Dublin Core / LIDO only)</small>
       <select name="metadata_prefix">
         <option value="oai_dc" selected>oai_dc (Dublin Core — universal)</option>
         <option value="lido">lido (LIDO — museums)</option>
-        <option value="marcxml">marcxml (MARC — Sprint 25)</option>
+        <option value="marcxml">marcxml (MARC)</option>
       </select>
       <p class="help">
-        Leave on <code class="muted">oai_dc</code> for the Dublin Core kind.
-        The LIDO kinds pin the prefix automatically.
+        Used only for the Dublin Core OAI-PMH kind. The other kinds
+        pin the prefix automatically or use the MARC flavor instead.
       </p>
+    </label>
+    <label>
+      MARC flavor <small>(MARC / MARCXML kinds only)</small>
+      <select name="marc_flavor">
+        <option value="marc21" selected>MARC21 — LC / Koha default</option>
+        <option value="unimarc">UNIMARC — BnF, PMB, many francophone libraries</option>
+      </select>
+      <p class="help">Controls how tags are mapped onto the public record shape
+        (245$a vs 200$a for title, 100$a vs 700$a for author, …).</p>
     </label>
     <label>
       Set (optional, OAI-PMH only)

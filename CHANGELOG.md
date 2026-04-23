@@ -9,6 +9,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Sprint 25 — MARC21 / UNIMARC + CSV importers**: covers the
+  SIGB/catalogue crowd that OAI-PMH Dublin Core leaves behind
+  (Koha exports, PMB dumps, Aleph / Symphony pulls, raw spreadsheet
+  exports from any archive or library software). Four new importer
+  kinds, all stdlib-only:
+  - New `app/importers/marc.py` — hand-rolled ISO 2709 parser
+    (~100 LoC) that walks the leader, directory and variable
+    fields without `pymarc`, plus a MARCXML parser sharing the
+    same `MarcRecord` shape. Two *flavors* ship:
+    - `marc21`: `245$a`/`100$a`/`700$a`/`260$b`/`260$c`/`020$a`/
+      `650$a`/`500$a`/`520$a` — LC / Koha default.
+    - `unimarc`: `200$a`/`700$a`/`701$a`/`210$c`/`210$d`/`010$a`/
+      `606$a`/`330$a` — BnF, PMB, most francophone libraries.
+    The mapper also handles the usual `260,` / `260.` punctuation
+    artefacts and pulls ISBN out of `9781234567890 (pbk)` noise.
+    Malformed records are skipped with a `logger.exception`, never
+    blow up the batch.
+  - New `app/importers/csv_importer.py` — stdlib `csv` with dialect
+    sniffing (commas, semicolons, tabs, pipes). First row becomes
+    the header; matching column names become keys on the backend
+    document. Plural columns (`creators`, `subject`, `authors`,
+    `identifiers`, `languages`) are always split on `|`; other
+    columns opt in by using the separator in the cell. UTF-8 BOM
+    tolerated. Rows without `id` are skipped.
+  - Three new flat-file kinds (`marc_file`, `marcxml_file`,
+    `csv_file`) and one new OAI-PMH kind (`oaipmh_marcxml`)
+    plug into the Sprint 24 dispatcher. The `metadata_prefix`
+    column now carries the *MARC flavor* for MARC kinds (stored
+    as `marc21` / `unimarc`), keeping the row shape unchanged —
+    no migration.
+  - `app.importers.SUPPORTED_KINDS`, `OAIPMH_KINDS` and
+    `SUPPORTED_MARC_FLAVORS` are the single source of truth for
+    the admin REST payload, UI template and dispatcher.
+  - `CreateImportSourceRequest.kind` widens to the seven supported
+    kinds; `POST /admin/v1/imports/{id}/identify` now refuses
+    every `*_file` kind.
+  - Admin UI imports form grows a **MARC flavor** selector
+    (MARC21 / UNIMARC) and the Importer-kind dropdown now lists
+    the seven kinds with short Koha/PMB/Axiell hints. Help text
+    tells operators to save their spreadsheet as UTF-8 CSV with an
+    `id` column when nothing else is available.
+  - 31 new tests in `tests/security/test_sprint25_marc_csv.py`
+    cover ISO 2709 round-trip, malformed leader / short record /
+    garbage-in-stream, MARC21 + UNIMARC tag mapping (incl.
+    French accents end-to-end), MARCXML collection + bare
+    `<record>` fallback, malformed XML, flat-file ingest
+    (missing path, malformed XML, happy path), CSV parse
+    (header detection, missing `id`, UTF-8 BOM, semicolon
+    dialect, list splitting), dispatcher routing for all four
+    new kinds, UI form lists all seven kinds + MARC flavor,
+    UI `/add` persists flavor, UI rejects unknown flavor,
+    admin REST accepts all new kinds, `/identify` refuses
+    `marc_file`, end-to-end `/run` for `marc_file`.
+
 - **Sprint 24 — LIDO importer (OAI-PMH + flat-file)**: pairs the
   Sprint 23 museum profile with a real way to load content. Museum
   DAMS (Axiell, Micromusée, TMS, Mobydoc, …) either expose LIDO over

@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.auth.dependencies import require_admin_key
 from app.dependencies import container
 from app.errors import AppError
-from app.importers import run_import
+from app.importers import OAIPMH_KINDS, run_import
 from app.importers.oaipmh import identify as oai_identify
 
 router = APIRouter(
@@ -34,11 +34,22 @@ class _StrictModel(BaseModel):
 
 class CreateImportSourceRequest(_StrictModel):
     label: str = Field(..., min_length=1, max_length=128)
-    # ``url`` holds the OAI-PMH base URL for ``oaipmh`` / ``oaipmh_lido``
-    # and the absolute filesystem path for ``lido_file`` — the dispatcher
+    # ``url`` holds the OAI-PMH base URL for the oaipmh_* kinds and the
+    # absolute filesystem path for every ``*_file`` kind. The dispatcher
     # in :mod:`app.importers` interprets it per kind.
-    kind: Literal["oaipmh", "oaipmh_lido", "lido_file"] = "oaipmh"
+    kind: Literal[
+        "oaipmh",
+        "oaipmh_lido",
+        "oaipmh_marcxml",
+        "lido_file",
+        "marc_file",
+        "marcxml_file",
+        "csv_file",
+    ] = "oaipmh"
     url: str = Field(..., min_length=1, max_length=2048)
+    # For OAI-PMH kinds this is the metadataPrefix; for MARC flat files
+    # it carries the flavor (``marc21`` or ``unimarc``); for CSV it is
+    # ignored. Empty string means "use the kind's default".
     metadata_prefix: str = Field(default="oai_dc", max_length=64)
     set_spec: str | None = Field(default=None, max_length=256)
     schema_profile: Literal["library", "museum", "archive", "custom"] = "library"
@@ -143,7 +154,7 @@ def identify_endpoint(source_id: int) -> dict[str, str]:
     the same protocol envelope; flat-file LIDO sources return 400.
     """
     src = container.store.get_import_source(source_id)
-    if src is None or src.kind not in {"oaipmh", "oaipmh_lido"} or not src.url:
+    if src is None or src.kind not in OAIPMH_KINDS or not src.url:
         raise AppError(
             "invalid_parameter",
             "Only configured OAI-PMH sources can be identified.",
