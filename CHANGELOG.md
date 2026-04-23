@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Sprint 28 — Public landing page + positioning** gives
+  non-technical visitors a first page that explains what EGG-API is,
+  who it is for, and how to get started — without assuming they
+  speak FastAPI, OpenSearch or OAI-PMH.
+  - New ``app/landing/`` module with:
+    - ``GET /`` — landing page listing the three collection profiles
+      (library / museum / archive), the nine importers, and the
+      outbound OAI provider; carries a live **Status** tile that
+      degrades gracefully when the backend is unreachable.
+    - ``GET /about`` — design principles, product positioning,
+      "what EGG-API is *not*", and links back to the wizard /
+      admin console / OAI / OpenAPI.
+    - ``/landing-static/landing.css`` — tiny dedicated stylesheet
+      (no CDN, no JS) with a warm archivist-friendly palette.
+  - Both routes use ``include_in_schema=False`` so the Sprint 5
+    public path snapshot stays stable; ``tests/snapshots/openapi_paths.json``
+    is unchanged.
+  - 7 new tests in ``tests/security/test_sprint28_landing.py`` cover
+    HTML content markers (profiles, importers, CTA copy), outbound
+    link targets (admin console, setup wizard, OAI, OpenAPI, search),
+    the status-tile happy path + backend-down degradation, the CSS
+    asset being served under ``/landing-static``, and the OpenAPI
+    exclusion.
+
 - **Sprint 27 — Scheduler + outbound OAI-PMH provider** turns EGG-API
   into a fully autonomous GLAM publication node: catalogues refresh
   themselves on a cadence, and aggregators (Europeana, Gallica,

@@ -22,6 +22,13 @@ EGG-API is the middle layer that makes this possible. It sits between the public
 
 You should **not** need to write Python, a query DSL, or a REST spec to deploy it. If you can edit a settings form, you can run EGG-API.
 
+A public **landing page** (Sprint 28) lives at `/` and introduces EGG
+to first-time visitors — three collection profiles (library / museum /
+archive), nine importers, the outbound OAI-PMH provider, and a
+*Start the setup wizard* CTA. `/about` explains design principles
+and positioning. Both pages render without JavaScript and degrade
+gracefully when the backend is offline.
+
 ### Current delivery & desktop roadmap
 
 **Today**, EGG-API ships as a FastAPI service with a web-based admin UI at

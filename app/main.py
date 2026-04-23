@@ -24,6 +24,7 @@ from app.admin_api.routes import router as admin_router
 from app.admin_ui.routes import router as admin_ui_router
 from app.dependencies import container
 from app.errors import AppError, to_error_response
+from app.landing.routes import router as landing_router
 from app.logging import configure as configure_logging
 from app.logging.request_context import get_request_id
 from app.metrics import (
@@ -179,10 +180,18 @@ app.include_router(admin_releases_router)
 # /admin/v1/imports (Sprint 22): OAI-PMH import sources + runs.
 app.include_router(admin_imports_router)
 app.include_router(admin_ui_router)
+# Sprint 28: public landing page at GET / + /about. Registered after the
+# admin routers so operator surfaces keep precedence on name-clashes.
+app.include_router(landing_router)
 app.mount(
     "/admin-static",
     StaticFiles(directory=Path(__file__).parent / "admin_ui" / "static"),
     name="admin-static",
+)
+app.mount(
+    "/landing-static",
+    StaticFiles(directory=Path(__file__).parent / "landing" / "static"),
+    name="landing-static",
 )
 
 

@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>About {{ brand }}</title>
+  <link rel="stylesheet" href="/landing-static/landing.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><a href="/">{{ brand }}</a> <span class="tag">v{{ version }}</span></div>
+    <nav>
+      <a href="/">Home</a>
+      <a href="/admin/ui">Open the console</a>
+      <a href="/v1/oai?verb=Identify">OAI endpoint</a>
+    </nav>
+  </header>
+
+  <div class="container">
+    <h1>About {{ brand }}</h1>
+    <p>
+      {{ brand }} started as a thin façade over Elasticsearch for heritage
+      institutions. After a full product review (sprints 11 → 27) it grew
+      into a complete publication layer that ingests the file / protocol
+      formats every SIGB, DAMS and archive CMS actually exports, republishes
+      through a clean JSON API and an OAI-PMH endpoint, and lets
+      non-technical operators drive the whole flow from a browser.
+    </p>
+
+    <div class="section">
+      <h2>Design principles</h2>
+      <ul>
+        <li><strong>Zero IT required</strong>. Every install decision the
+          operator has to make is exposed as a form field in the admin
+          wizard. No YAML editing, no container orchestration, no cron job
+          authoring.</li>
+        <li><strong>Dependencies stay boring</strong>. FastAPI + Pydantic +
+          httpx + stdlib XML / CSV. No <code>pymarc</code>, no
+          <code>lxml</code>, no <code>openpyxl</code>, no APScheduler, no
+          message broker — everything bundled in a single Python process.</li>
+        <li><strong>Standards out of the box</strong>. OAI-PMH in and out,
+          IIIF manifest passthrough, Dublin Core / LIDO / MARC / EAD
+          mappers, JSON-LD search responses. Aggregators can harvest you
+          the day you install.</li>
+        <li><strong>No scare tactics, no vendor lock-in</strong>. No Apple
+          Developer fee, no Authenticode cert, no SaaS control plane. You
+          own the binary, the config, the database and the index.</li>
+      </ul>
+    </div>
+
+    <div class="section">
+      <h2>How it fits together</h2>
+      <ul>
+        <li>You run <strong>{{ brand }}</strong> next to your existing
+          Elasticsearch / OpenSearch cluster.</li>
+        <li>You connect your catalogue (SIGB, DAMS, archive CMS) through one
+          of the nine importers.</li>
+        <li>{{ brand }} indexes into ES / OS and exposes a curated public
+          JSON API + an OAI-PMH provider.</li>
+        <li>Aggregators harvest you; your front-end (or a prestataire's
+          front-end) consumes the JSON.</li>
+      </ul>
+    </div>
+
+    <div class="section">
+      <h2>Links</h2>
+      <ul>
+        <li><a href="/admin/ui/setup">Setup wizard</a></li>
+        <li><a href="/admin/ui">Admin console</a></li>
+        <li><a href="/v1/oai?verb=Identify">OAI-PMH endpoint</a></li>
+        <li><a href="/v1/openapi.json">OpenAPI schema</a></li>
+      </ul>
+    </div>
+  </div>
+
+  <footer>
+    {{ brand }} v{{ version }}
+  </footer>
+</body>
+</html>
