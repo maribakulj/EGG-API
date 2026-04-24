@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Configuration published</h2>
+<p class="success">Your API is now live on this configuration.</p>
+
+<div class="panel">
+  <h3>What you can do next</h3>
+  <ul>
+    <li>Visit the public API at <a href="/v1/livez"><code class="muted">/v1/livez</code></a> to confirm it is reachable.</li>
+    <li>Try <a href="/v1/search?q=*"><code class="muted">/v1/search?q=*</code></a> to run a first search.</li>
+    <li>Share <a href="/v1/openapi.json"><code class="muted">/v1/openapi.json</code></a> with your integrators.</li>
+    <li>Manage keys, monitor usage and re-run the wizard any time from the dashboard.</li>
+  </ul>
+</div>
+
+{% if shared_key %}
+<div class="secret-box">
+  <p><strong>Remember your first public API key</strong> ({{ shared_key.key_id }}):</p>
+  <p><code>{{ shared_key.key }}</code></p>
+  <p class="help">This value is shown once. Store it in your integrator's credentials manager now.</p>
+</div>
+{% endif %}
+
+<p><a href="/admin/ui">Back to the dashboard</a></p>
+{% endblock %}

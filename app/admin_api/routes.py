@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from dataclasses import asdict
 
+import yaml
 from fastapi import APIRouter, Body, Depends, Query, Request
+from fastapi.responses import PlainTextResponse
 
 from app.auth.dependencies import require_admin_key
 from app.config.models import AppConfig
@@ -107,6 +109,101 @@ def status() -> dict[str, object]:
             500,
         )
     return {"status": "ok", "sources": container.adapter.list_sources(), "mapping": mapping}
+
+
+@router.get("/logs")
+def logs(
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    endpoint: str | None = Query(None),
+    status_min: int | None = Query(None, ge=100, le=599),
+    status_max: int | None = Query(None, ge=100, le=599),
+    since: str | None = Query(None, description="ISO-8601 timestamp (inclusive lower bound)"),
+    until: str | None = Query(None, description="ISO-8601 timestamp (inclusive upper bound)"),
+    key_id: str | None = Query(None, description="Filter by api_key_id (public label)"),
+) -> dict[str, object]:
+    """Filterable structured-log query (SPECS §13.12).
+
+    Wraps ``usage_events`` with the fields an operator actually needs
+    during an incident: a time window, a status range, an endpoint or
+    a specific caller. Omit every filter for a plain "tail" view.
+    """
+    events, total = container.store.query_usage_events(
+        limit=limit,
+        offset=offset,
+        endpoint=endpoint,
+        status_min=status_min,
+        status_max=status_max,
+        since=since,
+        until=until,
+        key_id=key_id,
+    )
+    return {
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "filters": {
+            "endpoint": endpoint,
+            "status_min": status_min,
+            "status_max": status_max,
+            "since": since,
+            "until": until,
+            "key_id": key_id,
+        },
+        "events": [asdict(e) for e in events],
+    }
+
+
+@router.get("/export-config", response_class=PlainTextResponse)
+def export_config() -> PlainTextResponse:
+    """Return the active configuration as YAML (secrets redacted).
+
+    The ``ConfigManager.save()`` redaction list is reused: inline
+    backend credentials and the bootstrap key never leave the process.
+    Operators can commit the output to a config repo or feed it back
+    into ``POST /admin/v1/import-config`` on a peer node.
+    """
+    cfg_dict = container.config_manager.config.model_dump(mode="python")
+    # Keep the method module-local so we do not leak the "redact"
+    # API; it's intentionally private to ConfigManager.
+    redacted = container.config_manager._redact(cfg_dict)
+    body = yaml.safe_dump(redacted, sort_keys=False)
+    headers = {"content-disposition": "attachment; filename=egg-config.yaml"}
+    return PlainTextResponse(
+        content=body, media_type="application/yaml; charset=utf-8", headers=headers
+    )
+
+
+@router.post("/import-config")
+def import_config(request: Request, payload: dict[str, object] | None = Body(default=None)):
+    """Replace the active configuration from a YAML or JSON body.
+
+    Accepts ``application/json`` (Pydantic-style dict) or
+    ``application/yaml`` (raw text). Validation runs before the
+    container swap, so a bad payload leaves the running service on
+    its previous config.
+    """
+    # We accept ``application/json`` directly (FastAPI populates
+    # ``payload`` from the body). For YAML, operators can pipe
+    # ``yaml.safe_load`` client-side or go through /admin/ui/config.
+    if payload is None:
+        raise AppError(
+            "invalid_parameter",
+            "Request body is empty — send JSON with the new config.",
+            {"hint": "POST application/json with the config dict"},
+            status_code=400,
+        )
+    try:
+        cfg = AppConfig.model_validate(payload)
+    except Exception as exc:
+        raise AppError(
+            "invalid_parameter",
+            f"Configuration rejected: {exc}",
+            {"scope": "import"},
+            status_code=400,
+        ) from exc
+    container.reload(cfg)
+    return {"status": "imported"}
 
 
 @router.get("/storage/stats")

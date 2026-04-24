@@ -26,7 +26,6 @@ from app.adapters.elasticsearch.adapter import (
     ElasticsearchAdapter,
     _parse_major_version,
     _record_backend_error,
-    _tracing_headers,
 )
 from app.errors import AppError
 
@@ -35,7 +34,7 @@ class OpenSearchAdapter(ElasticsearchAdapter):
     _MIN_SUPPORTED_MAJOR_VERSION = 1
 
     def detect(self) -> dict[str, Any]:
-        response = self._request("GET", self.base_url, headers=_tracing_headers())
+        response = self._request("GET", self.base_url, headers=self._outgoing_headers())
         try:
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:

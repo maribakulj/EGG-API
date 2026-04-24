@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Glossary</h2>
+<p class="help">Plain-language definitions of the terms used across this console and the setup wizard.</p>
+
+<div class="panel">
+  <dl>
+    <dt><strong>Backend</strong></dt>
+    <dd>The search engine that actually stores your records — usually Elasticsearch or OpenSearch. EGG-API does not host your data; it reads from the backend.</dd>
+
+    <dt><strong>Index</strong></dt>
+    <dd>The pool of records inside the backend. Think of it as a collection or a table name. One EGG-API instance exposes one index.</dd>
+
+    <dt><strong>Record</strong></dt>
+    <dd>A single entry — one notice, one object, one photograph — as it appears in your catalogue.</dd>
+
+    <dt><strong>Mapping</strong></dt>
+    <dd>The translation between backend field names (e.g. <code class="muted">creator_csv</code>) and the public field names EGG exposes (e.g. <code class="muted">creators</code>).</dd>
+
+    <dt><strong>Facet</strong></dt>
+    <dd>A filterable breakdown of your catalogue — "how many records per type?", "per language?". Callers use facets to build navigation.</dd>
+
+    <dt><strong>Security profile</strong></dt>
+    <dd>A bundle of caps applied to every public request: max page size, number of facets, pagination depth. "Prudent" is the default; "Standard" is looser.</dd>
+
+    <dt><strong>Public mode</strong></dt>
+    <dd>Who can call <code class="muted">/v1/*</code>: anonymous, optional key, or required key.</dd>
+
+    <dt><strong>API key</strong></dt>
+    <dd>A random secret assigned to each partner. EGG never stores the raw value — only a hash — and shows it once, on creation.</dd>
+
+    <dt><strong>Rate limit</strong></dt>
+    <dd>A cap on how many requests a single caller can make per minute. Keeps the backend safe if an integrator misbehaves.</dd>
+
+    <dt><strong>Draft</strong></dt>
+    <dd>The in-progress configuration saved by the setup wizard. It is never applied until you click <em>Publish</em>.</dd>
+
+    <dt><strong>YAML</strong></dt>
+    <dd>A plain-text configuration format. The setup wizard avoids asking you to edit it directly.</dd>
+  </dl>
+</div>
+
+<p><a href="/admin/ui">Back to the dashboard</a></p>
+{% endblock %}

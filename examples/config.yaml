@@ -5,9 +5,27 @@ backend:
   timeout_seconds: 15.0
   max_retries: 2
   retry_backoff_seconds: 0.2
+  # Authenticate to the search backend. Mode "none" (the default) means
+  # no credentials. For ES 8+ with security enabled, pick one of:
+  #   mode: basic         (username + password or password_env)
+  #   mode: bearer        (token or token_env)
+  #   mode: api_key       (base64 "id:key" token or token_env)
+  # Inline ``password`` / ``token`` are accepted in memory (e.g. via
+  # PUT /admin/v1/config) but are stripped from the YAML on save — use
+  # ``password_env`` / ``token_env`` to keep the secret off disk.
+  auth:
+    mode: none
+    # username: elastic
+    # password_env: EGG_BACKEND_PASSWORD
 
 storage:
   sqlite_path: data/egg_state.sqlite3
+
+# Sprint 23: shape of the public Record. Change to ``museum`` to expose
+# the museum sub-block (inventory number, artist, medium, dimensions,
+# acquisition date, current location) and enable the IIIF passthrough at
+# ``/v1/manifest/{id}`` when ``links.iiif_manifest`` is mapped.
+schema_profile: library  # library | museum | archive | custom
 
 security_profile: prudent
 profiles:
@@ -39,6 +57,16 @@ auth:
   admin_cookie_secure: true
   admin_cookie_samesite: strict
   admin_session_ttl_hours: 12
+
+proxy:
+  # IP addresses of trusted reverse-proxy hops. Only set this if EGG-API
+  # sits behind nginx/Traefik/Caddy; otherwise an attacker could forge
+  # X-Forwarded-For and bypass per-IP rate limits.
+  trusted_proxies: []
+  # Host names the app will answer to. Empty = accept any Host header
+  # (fine for local dev). In production behind a shared proxy, pin this
+  # to the externally-advertised name(s), e.g. ["egg.example.org"].
+  allowed_hosts: []
 
 cors:
   mode: off  # off | allowlist | wide_open

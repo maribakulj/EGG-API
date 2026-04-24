@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>{{ t('imports.page.title') }}</h2>
+<p class="help">{{ t('imports.page.help') }}</p>
+
+{% if message %}<p class="success">{{ message }}</p>{% endif %}
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
+
+<div class="panel">
+  <h3>{{ t('imports.add.heading') }}</h3>
+  <form class="stack" method="post" action="/admin/ui/imports/add">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <label>
+      {{ t('imports.add.label') }}
+      <input name="label" required maxlength="128" placeholder="My catalogue" />
+      <p class="help">{{ t('imports.add.label_help') }}</p>
+    </label>
+    <label>
+      Importer kind
+      <select name="kind">
+        <option value="oaipmh" selected>OAI-PMH — Dublin Core (universal SIGB/OAI)</option>
+        <option value="oaipmh_lido">OAI-PMH — LIDO (museums)</option>
+        <option value="oaipmh_marcxml">OAI-PMH — MARCXML (Koha, Aleph, Symphony…)</option>
+        <option value="oaipmh_ead">OAI-PMH — EAD (archives, AtoM, Ligeo…)</option>
+        <option value="lido_file">LIDO — flat XML file on this machine</option>
+        <option value="marc_file">MARC — binary .mrc (ISO 2709)</option>
+        <option value="marcxml_file">MARCXML — flat XML file</option>
+        <option value="csv_file">CSV — flat spreadsheet (header-named columns)</option>
+        <option value="ead_file">EAD — flat XML file (finding aid)</option>
+      </select>
+      <p class="help">
+        Pick OAI-PMH — Dublin Core for any SIGB / catalogue with OAI.
+        Pick the LIDO variants for museum DAMS (Axiell, Micromusée, TMS, Mobydoc).
+        Pick MARC / MARCXML for libraries that export their catalogue as MARC
+        files (Koha, PMB, Orphée, Aleph, Symphony). Pick EAD for archive
+        finding aids (AtoM, Mnesys, Ligeo, ArchivesSpace, PLEADE). Pick CSV
+        when your software only exports spreadsheets — save as UTF-8 CSV
+        with an <code class="muted">id</code> column.
+      </p>
+    </label>
+    <label>
+      Endpoint URL or absolute file path
+      <input name="url" required placeholder="https://catalogue.example.org/oai" />
+      <p class="help">
+        For OAI-PMH: the base URL that answers <code class="muted">?verb=Identify</code>.
+        For the flat-file options: an absolute path readable by the server
+        (e.g. <code class="muted">/var/egg/imports/catalogue.mrc</code>).
+      </p>
+    </label>
+    <label>
+      Metadata prefix <small>(OAI-PMH Dublin Core / LIDO only)</small>
+      <select name="metadata_prefix">
+        <option value="oai_dc" selected>oai_dc (Dublin Core — universal)</option>
+        <option value="lido">lido (LIDO — museums)</option>
+        <option value="marcxml">marcxml (MARC)</option>
+      </select>
+      <p class="help">
+        Used only for the Dublin Core OAI-PMH kind. The other kinds
+        pin the prefix automatically or use the MARC flavor instead.
+      </p>
+    </label>
+    <label>
+      MARC flavor <small>(MARC / MARCXML kinds only)</small>
+      <select name="marc_flavor">
+        <option value="marc21" selected>MARC21 — LC / Koha default</option>
+        <option value="unimarc">UNIMARC — BnF, PMB, many francophone libraries</option>
+      </select>
+      <p class="help">Controls how tags are mapped onto the public record shape
+        (245$a vs 200$a for title, 100$a vs 700$a for author, …).</p>
+    </label>
+    <label>
+      Set (optional, OAI-PMH only)
+      <input name="set_spec" placeholder="photos:collection42" />
+      <p class="help">An OAI-PMH set identifier to restrict the harvest to a subset.</p>
+    </label>
+    <label>
+      Schema profile
+      <select name="schema_profile">
+        <option value="library" selected>Library</option>
+        <option value="museum">Museum</option>
+        <option value="archive">Archive</option>
+        <option value="custom">Custom</option>
+      </select>
+      <p class="help">LIDO imports usually pair with the <em>museum</em> profile.</p>
+    </label>
+    <label>
+      {{ t('imports.add.schedule') }}
+      <select name="schedule">
+        <option value="" selected>{{ t('imports.add.schedule.manual') }}</option>
+        <option value="hourly">{{ t('imports.add.schedule.hourly') }}</option>
+        <option value="6h">{{ t('imports.add.schedule.6h') }}</option>
+        <option value="daily">{{ t('imports.add.schedule.daily') }}</option>
+        <option value="weekly">{{ t('imports.add.schedule.weekly') }}</option>
+      </select>
+      <p class="help">
+        When set, EGG-API automatically runs the importer at the
+        chosen cadence. Leave on <em>Manual only</em> for one-off
+        catalogues; pick a cadence for live SIGB/DAMS feeds that
+        should stay fresh without the operator having to click.
+      </p>
+    </label>
+    <div class="actions">
+      <button type="submit">Add source</button>
+    </div>
+  </form>
+</div>
+
+<div class="panel">
+  <h3>Configured sources</h3>
+  {% if not sources %}
+    <p class="help">No sources yet. Add one above.</p>
+  {% else %}
+    <table>
+      <thead>
+        <tr>
+          <th>Label</th><th>Endpoint</th><th>Prefix</th><th>Set</th>
+          <th>Profile</th><th>Schedule</th><th>Last run</th><th>Next run</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for src in sources %}
+        <tr>
+          <td>{{ src.label }}</td>
+          <td><code class="muted">{{ src.url }}</code></td>
+          <td>{{ src.metadata_prefix }}</td>
+          <td>{{ src.set_spec or '—' }}</td>
+          <td>{{ src.schema_profile }}</td>
+          <td>{{ src.schedule or 'manual' }}</td>
+          <td>{{ src.last_run_at or 'never' }}</td>
+          <td>{{ src.next_run_at or '—' }}</td>
+          <td>
+            <form class="inline-form" method="post" action="/admin/ui/imports/{{ src.id }}/run">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+              <button type="submit">Run now</button>
+            </form>
+            <form class="inline-form" method="post" action="/admin/ui/imports/{{ src.id }}/delete">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+              <button type="submit" class="secondary">Delete</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+</div>
+
+{% if recent_runs %}
+<div class="panel">
+  <h3>Recent runs</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Source</th><th>Started</th><th>Finished</th><th>Status</th>
+        <th>Ingested</th><th>Failed</th><th>Error</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for run in recent_runs %}
+      <tr>
+        <td>{{ run.source_label }}</td>
+        <td>{{ run.started_at }}</td>
+        <td>{{ run.ended_at or '—' }}</td>
+        <td>
+          {% if run.status == 'succeeded' %}<span class="success" style="padding:0.1rem 0.4rem">{{ run.status }}</span>
+          {% elif run.status == 'failed' %}<span class="error" style="padding:0.1rem 0.4rem">{{ run.status }}</span>
+          {% else %}{{ run.status }}{% endif %}
+        </td>
+        <td>{{ run.records_ingested }}</td>
+        <td>{{ run.records_failed }}</td>
+        <td>{{ run.error_message or '' }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}

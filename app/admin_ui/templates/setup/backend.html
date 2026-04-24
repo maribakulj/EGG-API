@@ -1,0 +1,118 @@
+{% extends "setup/_layout.html" %}
+{% block wizard %}
+<div class="panel">
+  <h3>Step 1 — Connect to your search backend</h3>
+  <p class="help">
+    EGG-API does not host your data. Point it at the search engine you
+    already run (Elasticsearch or OpenSearch). EGG reads from it in
+    read-only mode.
+  </p>
+
+  <form method="post" action="/admin/ui/setup/discover" class="inline-form" style="margin-bottom:1rem">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <button type="submit">Detect a backend on this machine</button>
+    <small>Tries localhost and the common docker-compose hostnames. No credentials are sent.</small>
+  </form>
+
+  {% if discovery_candidates %}
+  <div class="panel" style="background:#fff">
+    <h4>Discovery results</h4>
+    <table>
+      <thead><tr><th>URL</th><th>Detected</th><th>Status</th><th>Action</th></tr></thead>
+      <tbody>
+      {% for candidate in discovery_candidates %}
+        <tr>
+          <td><code class="muted">{{ candidate.url }}</code></td>
+          <td>
+            {% if candidate.backend_type %}{{ candidate.backend_type }}{% if candidate.version %} {{ candidate.version }}{% endif %}{% else %}—{% endif %}
+          </td>
+          <td>
+            {% if candidate.status == 'ok' %}<span class="success" style="padding:0.1rem 0.4rem">reachable</span>
+            {% elif candidate.status == 'needs_auth' %}<span class="secret-box" style="padding:0.1rem 0.4rem">needs auth</span>
+            {% elif candidate.status == 'unsupported_version' %}<span class="error" style="padding:0.1rem 0.4rem">too old</span>
+            {% else %}<small>{{ candidate.message or 'not reachable' }}</small>{% endif %}
+          </td>
+          <td>
+            {% if candidate.status in ('ok', 'needs_auth') %}
+            <form method="post" action="/admin/ui/setup/discover/use" class="inline-form">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+              <input type="hidden" name="url" value="{{ candidate.url }}" />
+              <input type="hidden" name="backend_type" value="{{ candidate.backend_type or 'elasticsearch' }}" />
+              <button type="submit">Use this URL</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  <form class="stack" method="post" action="/admin/ui/setup/backend">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <label>
+      Engine
+      <select name="backend_type">
+        <option value="elasticsearch" {% if draft.backend.type == 'elasticsearch' %}selected{% endif %}>Elasticsearch (7.x or later)</option>
+        <option value="opensearch" {% if draft.backend.type == 'opensearch' %}selected{% endif %}>OpenSearch (1.x or later)</option>
+      </select>
+      <p class="help">Pick the software your index runs on. If unsure, ask whoever set up the server.</p>
+    </label>
+
+    <label>
+      Backend URL
+      <input name="backend_url" value="{{ draft.backend.url }}" placeholder="https://elasticsearch.internal:9200" required />
+      <p class="help">The full URL including scheme and port. Credentials must NOT be part of the URL — use the auth section below.</p>
+    </label>
+
+    <fieldset>
+      <legend>Authentication</legend>
+      <label>
+        Mode
+        <select name="auth_mode">
+          {% set mode = draft.backend.auth.mode or 'none' %}
+          <option value="none" {% if mode == 'none' %}selected{% endif %}>None (open backend)</option>
+          <option value="basic" {% if mode == 'basic' %}selected{% endif %}>Basic (username + password)</option>
+          <option value="bearer" {% if mode == 'bearer' %}selected{% endif %}>Bearer token</option>
+          <option value="api_key" {% if mode == 'api_key' %}selected{% endif %}>ES native API key (base64)</option>
+        </select>
+        <p class="help">Elasticsearch 8+ has security enabled by default; pick "Basic" with the user/password your admin gave you.</p>
+      </label>
+      <label>
+        Username <small>(basic only)</small>
+        <input name="auth_username" value="{{ draft.backend.auth.username or '' }}" />
+      </label>
+      <label>
+        Password env var <small>(basic — recommended, value never persisted)</small>
+        <input name="auth_password_env" value="{{ draft.backend.auth.password_env or '' }}" placeholder="EGG_BACKEND_PASSWORD" />
+      </label>
+      <label>
+        Password (inline) <small>(not recommended — stripped from YAML on save)</small>
+        <input type="password" name="auth_password" value="" />
+        <p class="help">Leave blank if you set the env var above. An existing inline value is kept across steps even if this field is empty.</p>
+      </label>
+      <label>
+        Token env var <small>(bearer / api_key — recommended)</small>
+        <input name="auth_token_env" value="{{ draft.backend.auth.token_env or '' }}" placeholder="EGG_BACKEND_TOKEN" />
+      </label>
+      <label>
+        Token (inline) <small>(stripped from YAML on save)</small>
+        <input type="password" name="auth_token" value="" />
+      </label>
+    </fieldset>
+
+    <div class="actions">
+      <button type="submit" name="action" value="test">Test connection</button>
+      <button type="submit" name="action" value="next">Save &amp; next</button>
+    </div>
+  </form>
+</div>
+
+{% if probe_result %}
+<div class="panel">
+  <h3>Probe result</h3>
+  <p>Version detected: <code class="muted">{{ probe_result.version }}</code></p>
+</div>
+{% endif %}
+{% endblock %}

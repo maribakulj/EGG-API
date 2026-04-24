@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import stat
 from pathlib import Path
 
 import yaml
@@ -37,7 +39,14 @@ class ConfigManager:
 
     # Config keys that must never be serialized to the YAML file. Secrets should be
     # provided via environment variable or a 0600 sidecar file instead.
-    _REDACTED_KEYS: tuple[tuple[str, ...], ...] = (("auth", "bootstrap_admin_key"),)
+    _REDACTED_KEYS: tuple[tuple[str, ...], ...] = (
+        ("auth", "bootstrap_admin_key"),
+        # Backend credentials: inline values are accepted in memory (e.g.
+        # during a config round-trip) but never hit disk. Operators pin
+        # them via ``backend.auth.password_env`` / ``token_env``.
+        ("backend", "auth", "password"),
+        ("backend", "auth", "token"),
+    )
 
     @classmethod
     def _redact(cls, data: dict[str, object]) -> dict[str, object]:
@@ -57,6 +66,12 @@ class ConfigManager:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         data = self._redact(config.model_dump(mode="python"))
         self.path.write_text(yaml.safe_dump(data, sort_keys=False))
+        # The config file may contain sensitive values (backend URL with
+        # embedded credentials, API-key pepper references, CORS allowlists
+        # revealing partner origins). Restrict it to the owner on POSIX;
+        # the chmod is a no-op on Windows, which is acceptable.
+        with contextlib.suppress(OSError):
+            self.path.chmod(stat.S_IRUSR | stat.S_IWUSR)
 
     def validate_data(self, data: dict[str, object]) -> tuple[bool, str | None]:
         try:

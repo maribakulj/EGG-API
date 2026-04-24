@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>EGG-API — a safe public façade for your GLAM catalogue</title>
+  <link rel="stylesheet" href="assets/site.css" />
+</head>
+<body>
+  <header>
+    <nav>
+      <a href="#" class="brand">EGG-API</a>
+      <a href="#download">Download</a>
+      <a href="#wizard">Wizard tour</a>
+      <a href="#who-for">Who it's for</a>
+      <a href="https://github.com/maribakulj/egg-api" target="_blank" rel="noopener">GitHub</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <h1>A safe, guided public API for your catalogue.</h1>
+      <p class="tagline">
+        EGG-API wraps a read-only façade around the search backend you already
+        run (Elasticsearch, OpenSearch) and lets a non-technical operator
+        publish it through an eight-step wizard — no YAML, no terminal.
+      </p>
+      <p class="cta">
+        <a class="primary" href="#download">Download the desktop installer</a>
+        <a class="secondary" href="https://github.com/maribakulj/egg-api/blob/main/INSTALL.md"
+           target="_blank" rel="noopener">Or install from source</a>
+      </p>
+      <p class="version" id="current-version">Current release: v2.0.0</p>
+    </section>
+
+    <section id="wizard" class="features">
+      <h2>An eight-step wizard, no YAML</h2>
+      <ol>
+        <li><strong>Connect</strong> — point EGG at your Elasticsearch/OpenSearch URL and credentials. Click "Test connection".</li>
+        <li><strong>Source</strong> — pick the index or collection to expose. The wizard lists what the backend advertises.</li>
+        <li><strong>Mapping</strong> — the wizard proposes a translation from backend field names to the public shape (id, title, creators…). Adjust with dropdowns.</li>
+        <li><strong>Security</strong> — "Prudent" or "Standard" profile; decide if the public API needs a key.</li>
+        <li><strong>Exposure</strong> — checkboxes for the facets, sorts and fields your API will accept.</li>
+        <li><strong>Keys</strong> — mint a first partner key (shown once). The raw secret is never persisted.</li>
+        <li><strong>Test</strong> — run a live search against the draft config and inspect a sample record.</li>
+        <li><strong>Publish</strong> — swap the running service onto the new config. Done.</li>
+      </ol>
+    </section>
+
+    <section id="download" class="download">
+      <h2>Get the desktop app</h2>
+      <div class="download-grid">
+        <div class="card">
+          <h3>macOS</h3>
+          <p>Universal <code>.pkg</code> installer. Opens in <code>~/Applications</code> and writes to <code>~/Library/Application Support/EGG-API</code>.</p>
+          <p><a href="https://github.com/maribakulj/egg-api/releases/latest" target="_blank" rel="noopener">Download from Releases</a></p>
+        </div>
+        <div class="card">
+          <h3>Windows</h3>
+          <p><code>.msi</code> installer. Writes to <code>%APPDATA%\EGG-API</code>. Requires Windows 10+ with WebView2.</p>
+          <p><a href="https://github.com/maribakulj/egg-api/releases/latest" target="_blank" rel="noopener">Download from Releases</a></p>
+        </div>
+        <div class="card">
+          <h3>Linux</h3>
+          <p>AppImage (WebKitGTK required). Writes to <code>$XDG_DATA_HOME/egg-api</code>.</p>
+          <p><a href="https://github.com/maribakulj/egg-api/releases/latest" target="_blank" rel="noopener">Download from Releases</a></p>
+        </div>
+      </div>
+      <p class="note">
+        Installers are <strong>unsigned by choice</strong> (keeps the project free —
+        no Apple Developer fee, no Authenticode EV cert). Windows SmartScreen and
+        macOS Gatekeeper will warn at first launch; dismiss with a single
+        <em>Run anyway</em> / <em>Open anyway</em> click. Full procedure in
+        <a href="https://github.com/maribakulj/egg-api/blob/main/docs/first-launch.md" target="_blank" rel="noopener">docs/first-launch.md</a>.
+      </p>
+    </section>
+
+    <section id="who-for" class="who-for">
+      <h2>Who is this for?</h2>
+      <div class="grid">
+        <div>
+          <h3>Archivists &amp; librarians</h3>
+          <p>
+            Run an Elasticsearch index somewhere already. Want to publish a
+            safe search API without getting an engineering team involved.
+          </p>
+        </div>
+        <div>
+          <h3>Small institutions</h3>
+          <p>
+            No dedicated DevOps. You want sane defaults (rate limits, CSP,
+            query policy, audit trail) without having to re-implement them.
+          </p>
+        </div>
+        <div>
+          <h3>Partner integrators</h3>
+          <p>
+            Need a stable OpenAPI contract and per-partner keys. EGG never
+            leaks the underlying DSL to the public API.
+          </p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <p>
+      EGG-API is MIT-licensed. Source, issues and security reports on
+      <a href="https://github.com/maribakulj/egg-api" target="_blank" rel="noopener">GitHub</a>.
+    </p>
+  </footer>
+</body>
+</html>

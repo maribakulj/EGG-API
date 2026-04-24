@@ -36,9 +36,23 @@ def create_ui_session_for_api_key(api_key: str) -> str:
     return container.store.create_ui_session(identity.key_id, ttl_hours=ttl_hours)
 
 
+def create_ui_session_for_key_id(key_id: str) -> str:
+    """Bypass the API-key lookup when we already know the owner.
+
+    Used by :mod:`app.admin_ui.routes` after consuming a first-run OTP:
+    the OTP itself proves the caller holds terminal access to the
+    server, and the underlying ``key_id`` points at a still-active
+    admin row. The UI session is otherwise identical to the
+    login-form flavour.
+    """
+    ttl_hours = container.config_manager.config.auth.admin_session_ttl_hours
+    return container.store.create_ui_session(key_id, ttl_hours=ttl_hours)
+
+
 def get_ui_key_id(request: Request) -> str | None:
     token = request.cookies.get(SESSION_COOKIE)
-    return container.store.get_ui_session_key_id(token)
+    idle = container.config_manager.config.auth.admin_session_idle_timeout_minutes
+    return container.store.get_ui_session_key_id(token, idle_timeout_minutes=int(idle))
 
 
 def require_ui_session(request: Request) -> str:

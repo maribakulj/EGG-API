@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
 import time
 from pathlib import Path
 
@@ -12,13 +13,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from app import __version__
+from app.admin_api.imports import router as admin_imports_router
+from app.admin_api.keys import router as admin_keys_router
+from app.admin_api.releases import router as admin_releases_router
 from app.admin_api.routes import router as admin_router
 from app.admin_ui.routes import router as admin_ui_router
 from app.dependencies import container
 from app.errors import AppError, to_error_response
+from app.landing.routes import router as landing_router
 from app.logging import configure as configure_logging
 from app.logging.request_context import get_request_id
 from app.metrics import (
@@ -29,11 +35,16 @@ from app.metrics import (
     usage_persist_errors,
 )
 from app.public_api.routes import router as public_router
-from app.runtime_paths import is_production
+from app.runtime_paths import check_rate_limit_worker_safety, is_production
 from app.tracing import configure_tracing
 
 configure_logging()
 logger = structlog.get_logger("egg.http")
+
+# Multi-worker + in-memory rate limit is a silent security downgrade. Crash
+# on prod, warn in dev. Runs at import so uvicorn workers pick it up before
+# any request is served.
+check_rate_limit_worker_safety()
 
 
 async def _purge_loop() -> None:
@@ -90,12 +101,29 @@ async def _purge_loop() -> None:
 @contextlib.asynccontextmanager
 async def _lifespan(_: FastAPI):
     task = asyncio.create_task(_purge_loop())
+    # Sprint 27: start the import scheduler so sources with a cadence
+    # run without the operator clicking "Run now". The thread is a
+    # daemon so shutdown is atomic even if the hosting process dies
+    # mid-tick, and ``EGG_SCHEDULER=off`` lets ops turn it off per
+    # deployment (e.g. when running a read-only replica).
+    scheduler = None
+    if os.getenv("EGG_SCHEDULER", "on").strip().lower() != "off":
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler(
+            store=container.store,
+            bulk_index=container.adapter.bulk_index,
+            tick_seconds=float(os.getenv("EGG_SCHEDULER_TICK_SECONDS", "60") or 60),
+        )
+        scheduler.start()
     try:
         yield
     finally:
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task
+        if scheduler is not None:
+            scheduler.stop()
 
 
 # Hide the interactive explorers in production: they list every route
@@ -116,10 +144,20 @@ app = FastAPI(
 # the request arrives from a configured trusted hop. Without this, every
 # client behind the reverse proxy shares the proxy's IP for rate-limiting
 # and audit logs.
-_trusted = container.config_manager.config.proxy.trusted_proxies
+_proxy_cfg = container.config_manager.config.proxy
+_trusted = _proxy_cfg.trusted_proxies
 if _trusted:
     trusted_hosts = "*" if _trusted == ["*"] else ",".join(_trusted)
     app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=trusted_hosts)
+
+# Reject requests whose ``Host`` header does not match the configured list.
+# Starlette compares case-insensitively and supports a single ``*`` suffix
+# wildcard (``*.example.org``). Empty list → middleware skipped (local dev
+# and tests run against 127.0.0.1/testserver where host validation would
+# only create friction).
+_allowed_hosts = [h for h in _proxy_cfg.allowed_hosts if h]
+if _allowed_hosts:
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=_allowed_hosts)
 
 # Expose the container on ``app.state`` so handlers/tests can take it via
 # ``Depends(get_container)`` (see app.dependencies.get_container) instead of
@@ -134,11 +172,26 @@ configure_tracing(app)
 
 app.include_router(public_router)
 app.include_router(admin_router)
+# /admin/v1/keys lives in its own module (Sprint 13) to keep the CRUD
+# surface isolated from the setup/config routes.
+app.include_router(admin_keys_router)
+# /admin/v1/releases (Sprint 19): installed-version + update-check info.
+app.include_router(admin_releases_router)
+# /admin/v1/imports (Sprint 22): OAI-PMH import sources + runs.
+app.include_router(admin_imports_router)
 app.include_router(admin_ui_router)
+# Sprint 28: public landing page at GET / + /about. Registered after the
+# admin routers so operator surfaces keep precedence on name-clashes.
+app.include_router(landing_router)
 app.mount(
     "/admin-static",
     StaticFiles(directory=Path(__file__).parent / "admin_ui" / "static"),
     name="admin-static",
+)
+app.mount(
+    "/landing-static",
+    StaticFiles(directory=Path(__file__).parent / "landing" / "static"),
+    name="landing-static",
 )
 
 
@@ -196,6 +249,38 @@ def _route_template(request: Request, fallback: str) -> str:
     route = request.scope.get("route")
     path = getattr(route, "path", None) if route is not None else None
     return path or fallback
+
+
+@app.middleware("http")
+async def public_auth_lockout_middleware(request: Request, call_next):
+    """Short-circuit locked-out IPs on the public API (Sprint 18).
+
+    Counters are only bumped for 401s on ``/v1/*`` so the admin
+    surface keeps its own brute-force guard (login rate limiter).
+    """
+    path = request.url.path
+    client_host = request.client.host if request.client else "anonymous"
+    lockout = container.public_lockout
+    is_public = path.startswith("/v1/")
+
+    if is_public and lockout.is_locked(client_host):
+        rate_limit_hits.labels(scope="public_auth_lockout").inc()
+        return JSONResponse(
+            status_code=429,
+            content={
+                "error": {
+                    "code": "rate_limited",
+                    "message": "Too many invalid credentials from this IP.",
+                    "details": {"scope": "public_auth"},
+                    "request_id": request.headers.get("x-request-id", "generated"),
+                }
+            },
+        )
+
+    response = await call_next(request)
+    if is_public and response.status_code == 401:
+        lockout.record_failure(client_host)
+    return response
 
 
 @app.middleware("http")

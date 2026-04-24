@@ -81,6 +81,23 @@ class BackendAdapter(Protocol):
         when the backend cannot provide the capability at all.
         """
 
+    # Write operations (Sprint 22 importers) -----------------------------
+    def bulk_index(self, docs: list[dict[str, Any]]) -> tuple[int, int]:
+        """Index a batch of documents and return ``(ingested, failed)``.
+
+        Each ``doc`` is the raw backend shape (not a mapped public
+        ``Record``): the importer produces the same dict the backend
+        would have stored itself, including an ``id`` field. Adapters
+        choose the right upstream mechanism (ES ``_bulk``, future
+        MeiliSearch ``POST /indexes/<idx>/documents``, SQLite FTS
+        INSERT OR REPLACE, …). Implementations must:
+
+        - never raise on a per-document failure; tally it in ``failed``
+          and keep going;
+        - raise ``AppError("backend_unavailable", ..., 503)`` when the
+          backend itself is unreachable for the whole batch.
+        """
+
     # Response post-processing -------------------------------------------
     @staticmethod
     def extract_facets(payload: dict[str, Any]) -> dict[str, dict[str, int]]:

@@ -6,7 +6,7 @@ import json
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, Request, Response
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, RedirectResponse
 
 from app.auth.dependencies import enforce_public_auth, require_admin_key
 from app.dependencies import container
@@ -306,6 +306,38 @@ def collections(_: None = Depends(enforce_public_auth)) -> dict[str, object]:
     return {"collections": [{"id": name, "label": name} for name in sources]}
 
 
+@router.get("/manifest/{record_id}")
+def iiif_manifest_redirect(
+    record_id: str, _: None = Depends(enforce_public_auth)
+) -> RedirectResponse:
+    """Redirect to the IIIF manifest URL of ``record_id`` (SPECS §12.3).
+
+    Sprint 23 restores this endpoint as a **302 redirect**: EGG-API
+    does not host or generate IIIF manifests, but a museum that
+    mapped the ``links.iiif_manifest`` field gets a stable, public
+    pointer to the upstream manifest. Returns 404 when the record
+    has no IIIF link in its mapping or the record itself is missing.
+    """
+    raw = container.adapter.get_record(record_id)
+    if raw is None:
+        raise AppError(
+            "not_found",
+            f"Record {record_id!r} not found",
+            {"record_id": record_id},
+            status_code=404,
+        )
+    record = container.mapper.map_record(raw)
+    target = record.links.iiif_manifest
+    if not target:
+        raise AppError(
+            "not_found",
+            "Record has no IIIF manifest link",
+            {"record_id": record_id, "hint": "map links.iiif_manifest in your config"},
+            status_code=404,
+        )
+    return RedirectResponse(url=target, status_code=302)
+
+
 @router.get("/schema")
 def public_schema(_: None = Depends(enforce_public_auth)) -> dict[str, object]:
     """Return the active public schema for ``Record`` (SPECS §12.4).
@@ -330,3 +362,28 @@ def public_schema(_: None = Depends(enforce_public_auth)) -> dict[str, object]:
         "allowed_sorts": list(cfg.allowed_sorts),
         "filters": sorted(container.policy.filter_params),
     }
+
+
+# ---------------------------------------------------------------------------
+# Outbound OAI-PMH provider (Sprint 27)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/oai")
+def oai_pmh_endpoint(request: Request) -> Response:
+    """OAI-PMH 2.0 provider at ``/v1/oai``.
+
+    Unauthenticated by protocol contract: aggregators (Europeana,
+    Gallica, Isidore, BASE, OpenAIRE) expect to harvest without
+    credentials. The handler lives in :mod:`app.oai_provider`; this
+    thin wrapper reconstructs the request URL for the ``<request>``
+    element and returns the XML body with the canonical content type.
+    """
+
+    from app.oai_provider import build_request_url, handle
+
+    scheme = request.url.scheme
+    host = request.headers.get("host") or request.url.netloc
+    request_url = build_request_url(scheme=scheme, host=host, path=str(request.url.path))
+    body = handle(request_url=request_url, query_params=dict(request.query_params))
+    return Response(content=body, media_type="text/xml; charset=utf-8")

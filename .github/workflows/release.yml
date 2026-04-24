@@ -108,9 +108,63 @@ jobs:
           provenance: mode=max
           sbom: true
 
+  desktop:
+    name: Desktop installers (${{ matrix.name }})
+    needs: verify
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS
+            runner: macos-latest
+            briefcase_target: macOS app
+            artifact_glob: "dist/**/*.pkg"
+          - name: Windows
+            runner: windows-latest
+            briefcase_target: windows MSI
+            artifact_glob: "dist/**/*.msi"
+          - name: Linux
+            runner: ubuntu-latest
+            briefcase_target: linux -p AppImage
+            artifact_glob: "dist/**/*.AppImage"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Linux system packages for WebKitGTK
+        if: matrix.name == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgirepository1.0-dev \
+            libcairo2-dev \
+            libpango1.0-dev \
+            libwebkit2gtk-4.1-dev \
+            gir1.2-webkit2-4.1
+
+      - name: Install Briefcase
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install briefcase
+
+      - run: briefcase create ${{ matrix.briefcase_target }}
+      - run: briefcase build ${{ matrix.briefcase_target }}
+      - run: briefcase package ${{ matrix.briefcase_target }} --adhoc-sign
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.name }}
+          path: ${{ matrix.artifact_glob }}
+          if-no-files-found: error
+
   github-release:
     name: Create GitHub release
-    needs: [wheel, docker]
+    needs: [wheel, docker, desktop]
     runs-on: ubuntu-latest
     if: ${{ github.repository_owner == 'maribakulj' }}
     permissions:
@@ -118,11 +172,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download distribution artifacts
+      - name: Download wheel + sdist
         uses: actions/download-artifact@v4
         with:
           name: dist
           path: dist/
+
+      - name: Download desktop installers
+        uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-*
+          path: desktop/
+          merge-multiple: true
+
+      - name: Assemble release assets
+        run: |
+          mkdir -p release-assets
+          cp dist/*.whl dist/*.tar.gz release-assets/ 2>/dev/null || true
+          find desktop -type f \( -name "*.pkg" -o -name "*.msi" -o -name "*.AppImage" \) \
+            -exec cp {} release-assets/ \;
+          # Produce a SHA256SUMS file alongside the binaries so
+          # operators can verify unsigned installers out-of-band.
+          cd release-assets && sha256sum * > SHA256SUMS
 
       - name: Extract CHANGELOG section for this tag
         id: changelog
@@ -141,6 +212,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           body_path: ${{ steps.changelog.outputs.body_path }}
-          files: dist/*
+          files: release-assets/*
           draft: false
           prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-alpha') || contains(github.ref_name, '-beta') }}

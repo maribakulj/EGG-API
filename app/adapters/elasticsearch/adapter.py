@@ -15,7 +15,7 @@ import base64
 import json
 import random
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 import structlog
@@ -24,6 +24,9 @@ from app.errors import AppError
 from app.logging import get_logger
 from app.metrics import backend_errors
 from app.schemas.query import NormalizedQuery
+
+if TYPE_CHECKING:  # pragma: no cover
+    from app.config.models import BackendAuthConfig
 
 logger = get_logger("egg.adapter.es")
 
@@ -109,6 +112,40 @@ _DEFAULT_RETRY_DEADLINE_SECONDS = 30.0
 _JITTER_RATIO = 0.25  # ±25% of the nominal sleep
 
 
+def _build_auth_headers_and_basic(
+    auth_config: BackendAuthConfig | None,
+) -> tuple[dict[str, str], tuple[str, str] | None]:
+    """Resolve a :class:`BackendAuthConfig` into httpx-ready auth material.
+
+    Returns ``(headers, basic_auth_tuple)``: ``headers`` holds the
+    ``Authorization`` header for bearer/api_key modes (empty for
+    basic/none), ``basic_auth_tuple`` is the ``(user, password)`` pair
+    httpx accepts directly in ``auth=``. The split lets callers pass
+    basic credentials through httpx's native handler (which masks them
+    in repr/logs) instead of manually encoding them.
+    """
+    if auth_config is None or auth_config.mode == "none":
+        return {}, None
+    if auth_config.mode == "basic":
+        password = auth_config.resolve_password() or ""
+        username = auth_config.username or ""
+        return {}, (username, password)
+    if auth_config.mode == "bearer":
+        token = auth_config.resolve_token() or ""
+        if not token:
+            return {}, None
+        return {"Authorization": f"Bearer {token}"}, None
+    if auth_config.mode == "api_key":
+        # Elasticsearch/OpenSearch recognize ``Authorization: ApiKey <base64>``
+        # for their native API-key primitive. The token is already the
+        # base64-encoded ``id:api_key`` string when created via ES.
+        token = auth_config.resolve_token() or ""
+        if not token:
+            return {}, None
+        return {"Authorization": f"ApiKey {token}"}, None
+    return {}, None
+
+
 class ElasticsearchAdapter:
     def __init__(
         self,
@@ -122,6 +159,7 @@ class ElasticsearchAdapter:
         retry_backoff_cap_seconds: float = _DEFAULT_RETRY_CAP_SECONDS,
         retry_deadline_seconds: float = _DEFAULT_RETRY_DEADLINE_SECONDS,
         max_buckets_per_facet: int = 20,
+        auth_config: BackendAuthConfig | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.index = index
@@ -130,11 +168,24 @@ class ElasticsearchAdapter:
         self.retry_backoff_cap_seconds = max(0.0, float(retry_backoff_cap_seconds))
         self.retry_deadline_seconds = max(0.0, float(retry_deadline_seconds))
         self.max_buckets_per_facet = max(1, int(max_buckets_per_facet))
+        self._auth_headers, basic_auth = _build_auth_headers_and_basic(auth_config)
         # follow_redirects=False blocks SSRF via backend redirects to untrusted hosts.
         self.client = client or httpx.Client(
             timeout=float(timeout_seconds),
             follow_redirects=False,
+            auth=basic_auth,
         )
+
+    def _outgoing_headers(self) -> dict[str, str]:
+        """Merge tracing + configured backend auth headers for one request.
+
+        Kept as an instance method so subclasses (OpenSearch) inherit the
+        same policy and so tests can swap ``_auth_headers`` on a fixture.
+        """
+        headers = _tracing_headers()
+        if self._auth_headers:
+            headers.update(self._auth_headers)
+        return headers
 
     def _compute_sleep(self, attempt: int) -> float:
         """Exponential backoff with jitter, bounded by ``retry_backoff_cap_seconds``.
@@ -220,7 +271,7 @@ class ElasticsearchAdapter:
     _MIN_SUPPORTED_MAJOR_VERSION = 7
 
     def detect(self) -> dict[str, Any]:
-        response = self._request("GET", f"{self.base_url}", headers=_tracing_headers())
+        response = self._request("GET", f"{self.base_url}", headers=self._outgoing_headers())
         try:
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
@@ -248,7 +299,7 @@ class ElasticsearchAdapter:
 
     def health(self) -> dict[str, Any]:
         response = self._request(
-            "GET", f"{self.base_url}/_cluster/health", headers=_tracing_headers()
+            "GET", f"{self.base_url}/_cluster/health", headers=self._outgoing_headers()
         )
         try:
             response.raise_for_status()
@@ -266,7 +317,7 @@ class ElasticsearchAdapter:
 
     def scan_fields(self) -> dict[str, Any]:
         response = self._request(
-            "GET", f"{self.base_url}/{self.index}/_mapping", headers=_tracing_headers()
+            "GET", f"{self.base_url}/{self.index}/_mapping", headers=self._outgoing_headers()
         )
         response.raise_for_status()
         return response.json()
@@ -321,7 +372,7 @@ class ElasticsearchAdapter:
             "POST",
             f"{self.base_url}/{self.index}/_search",
             json=payload,
-            headers=_tracing_headers(),
+            headers=self._outgoing_headers(),
         )
         try:
             response.raise_for_status()
@@ -338,7 +389,7 @@ class ElasticsearchAdapter:
         response = self._request(
             "GET",
             f"{self.base_url}/{self.index}/_doc/{record_id}",
-            headers=_tracing_headers(),
+            headers=self._outgoing_headers(),
         )
         if response.status_code == 404:
             return None
@@ -384,7 +435,7 @@ class ElasticsearchAdapter:
             "POST",
             f"{self.base_url}/{self.index}/_search",
             json=body,
-            headers=_tracing_headers(),
+            headers=self._outgoing_headers(),
         )
         try:
             response.raise_for_status()
@@ -412,7 +463,7 @@ class ElasticsearchAdapter:
             "POST",
             f"{self.base_url}/{self.index}/_search",
             json=payload,
-            headers=_tracing_headers(),
+            headers=self._outgoing_headers(),
         )
         try:
             response.raise_for_status()
@@ -424,3 +475,57 @@ class ElasticsearchAdapter:
                 503,
             ) from exc
         return self.extract_facets(response.json())
+
+    def bulk_index(self, docs: list[dict[str, Any]]) -> tuple[int, int]:
+        """Index ``docs`` via the ES ``_bulk`` endpoint.
+
+        ``_bulk`` expects alternating action + source NDJSON lines.
+        A per-document failure reported in the response is counted in
+        ``failed`` without aborting the batch. An HTTP-level error on
+        the whole request surfaces as ``backend_unavailable``.
+        """
+        if not docs:
+            return 0, 0
+        lines: list[str] = []
+        for doc in docs:
+            doc_id = doc.get("id")
+            action: dict[str, Any] = {"index": {"_index": self.index}}
+            if doc_id:
+                action["index"]["_id"] = str(doc_id)
+            lines.append(json.dumps(action, separators=(",", ":")))
+            lines.append(json.dumps(doc, separators=(",", ":"), default=str))
+        body = "\n".join(lines) + "\n"
+        response = self._request(
+            "POST",
+            f"{self.base_url}/_bulk",
+            content=body.encode("utf-8"),
+            headers={**self._outgoing_headers(), "Content-Type": "application/x-ndjson"},
+        )
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise AppError(
+                "backend_unavailable",
+                "Bulk index failed",
+                {"reason": str(exc), "status_code": response.status_code},
+                503,
+            ) from exc
+        payload = response.json() if response.content else {}
+        items = payload.get("items", []) if isinstance(payload, dict) else []
+        ingested = 0
+        failed = 0
+        for item in items:
+            if not isinstance(item, dict):
+                failed += 1
+                continue
+            op = item.get("index") or item.get("create") or {}
+            status = int(op.get("status", 0))
+            if 200 <= status < 300:
+                ingested += 1
+            else:
+                failed += 1
+        # Fallback for adapters / fixtures that do not report per-item
+        # status: count every doc as ingested.
+        if not items:
+            ingested = len(docs)
+        return ingested, failed

@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="{{ lang }}">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{ t("about.heading") }} — {{ brand }}</title>
+  <link rel="stylesheet" href="/landing-static/landing.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><a href="/">{{ brand }}</a> <span class="tag">v{{ version }}</span></div>
+    <nav>
+      <a href="/">{{ t("landing.nav.home") }}</a>
+      <a href="/admin/ui">{{ t("landing.nav.console") }}</a>
+      <a href="/v1/oai?verb=Identify">{{ t("landing.nav.oai") }}</a>
+      <span class="lang-switch" aria-label="{{ t('lang.switch_to') }}">
+        {% for code in supported_langs %}
+          {% if code == lang %}
+            <strong>{{ t("lang." ~ code) }}</strong>
+          {% else %}
+            <a href="?lang={{ code }}">{{ t("lang." ~ code) }}</a>
+          {% endif %}
+          {% if not loop.last %} · {% endif %}
+        {% endfor %}
+      </span>
+    </nav>
+  </header>
+
+  <div class="container">
+    <h1>{{ t("about.heading") }}</h1>
+    <p>{{ t("about.intro") }}</p>
+
+    <div class="section">
+      <h2>{{ t("about.principles.heading") }}</h2>
+      <ul>
+        <li>{{ t("about.principles.zero_it") }}</li>
+        <li>{{ t("about.principles.boring_deps") }}</li>
+        <li>{{ t("about.principles.standards") }}</li>
+        <li>{{ t("about.principles.no_lock_in") }}</li>
+      </ul>
+    </div>
+
+    <div class="section">
+      <h2>{{ t("about.fits.heading") }}</h2>
+      {% if lang == "fr" %}
+      <ul>
+        <li>Vous lancez <strong>{{ brand }}</strong> à côté de votre cluster
+          Elasticsearch / OpenSearch existant.</li>
+        <li>Vous connectez votre catalogue (SIGB, DAMS, CMS d'archives) via
+          l'un des neuf importeurs.</li>
+        <li>{{ brand }} indexe dans ES / OS et expose une API JSON publique
+          + un fournisseur OAI-PMH.</li>
+        <li>Les agrégateurs vous moissonnent ; votre front-end (ou celui d'un
+          prestataire) consomme le JSON.</li>
+      </ul>
+      {% else %}
+      <ul>
+        <li>You run <strong>{{ brand }}</strong> next to your existing
+          Elasticsearch / OpenSearch cluster.</li>
+        <li>You connect your catalogue (SIGB, DAMS, archive CMS) through one
+          of the nine importers.</li>
+        <li>{{ brand }} indexes into ES / OS and exposes a curated public
+          JSON API + an OAI-PMH provider.</li>
+        <li>Aggregators harvest you; your front-end (or a prestataire's
+          front-end) consumes the JSON.</li>
+      </ul>
+      {% endif %}
+    </div>
+
+    <div class="section">
+      <h2>{{ t("about.links.heading") }}</h2>
+      <ul>
+        <li><a href="/admin/ui/setup">{{ t("landing.cta.setup") }}</a></li>
+        <li><a href="/admin/ui">{{ t("landing.cta.console") }}</a></li>
+        <li><a href="/v1/oai?verb=Identify">{{ t("landing.nav.oai") }}</a></li>
+        <li><a href="/v1/openapi.json">OpenAPI</a></li>
+      </ul>
+    </div>
+  </div>
+
+  <footer>
+    {{ brand }} v{{ version }}
+  </footer>
+</body>
+</html>

@@ -14,6 +14,16 @@ EGG-API is the middle layer that makes this possible. It sits between the public
 
 > EGG-API does not replace your source search engine, ILS, DAMS, or portal. It is a **normalizing, protective facade** that plugs on top of what you already run, and that can later serve as the base for an MCP connector (see SPECS §4).
 
+> **"But I don't have anything yet" (Sprint 30 note).** If your institution
+> does not already run an SIGB / DAMS / archive CMS, EGG-API is *not*
+> the right answer by itself — it is a publication layer, not a
+> content management system. The usual low-cost pairing is to install
+> [Omeka S](https://omeka.org/s/) (free, open-source, widely used for
+> small heritage collections) and point EGG at its built-in OAI-PMH
+> endpoint with the Sprint 22 `oaipmh` importer. Omeka handles the
+> CMS + storage side; EGG handles the public API + aggregator-facing
+> OAI-PMH + IIIF passthrough. No additional dev needed.
+
 ### Who it is for
 
 - **Small archives, libraries, museums, galleries** that host their own data but do not have IT or software-engineering staff on hand.
@@ -22,16 +32,44 @@ EGG-API is the middle layer that makes this possible. It sits between the public
 
 You should **not** need to write Python, a query DSL, or a REST spec to deploy it. If you can edit a settings form, you can run EGG-API.
 
-### The long-term vision: a desktop app
+A public **landing page** (Sprint 28) lives at `/` and introduces EGG
+to first-time visitors — three collection profiles (library / museum /
+archive), nine importers, the outbound OAI-PMH provider, and a
+*Start the setup wizard* CTA. `/about` explains design principles
+and positioning. Both pages render without JavaScript and degrade
+gracefully when the backend is offline.
 
-Today, EGG-API ships as a FastAPI service with a web-based admin UI at `/admin/*`. The **end goal** is to wrap the same runtime into a **desktop application** that a non-technical staff member can install on a workstation or a small server and configure entirely through standard, guided menus:
+**Bilingual by default (Sprint 29).** The landing page and `/about`
+render in English or French depending on a `?lang=fr` / `?lang=en`
+query parameter, an `egg_lang` cookie, or the browser's
+`Accept-Language` header. An `EGG_DEFAULT_LANG=fr` environment
+variable lets a francophone deployment (Koha / PMB / AtoM / Mnesys /
+Ligeo) boot directly in French.
 
-- point it at the existing backend (URL, index/collection, credentials);
-- let it introspect the backend fields and propose a default mapping;
-- pick a security profile (prudent / standard / custom);
-- click **Publish** and get a secured, documented public API on top of the institution's data.
+### Current delivery & desktop roadmap
 
-No terminal, no YAML hand-editing, no DevOps rotation. Install, configure, expose — safely.
+**Today**, EGG-API ships as a FastAPI service with a web-based admin UI at
+`/admin/*`. Bringing it up still requires a terminal, Python 3.10+, and one
+YAML edit (or a sequence of admin-API calls). In other words: the current
+release is aimed at an operator, not at an archivist working alone.
+
+**The roadmap** toward the original product promise is explicit and tracked:
+
+1. A guided **Admin UI setup wizard** (SPECS §26, 7 screens) covering
+   backend connection, source selection, field mapping, security profile,
+   exposure, keys and a live test — so configuration stops requiring YAML.
+2. A **desktop package** (`.msi` / `.pkg` / `.AppImage`) built with
+   Briefcase + `pywebview`, launching the same FastAPI runtime in a native
+   window on localhost.
+3. A **first-run UX** (`egg-api start`) that generates the admin key,
+   opens the wizard in the default browser via a one-time token, and
+   persists runtime data under the OS-native user directory.
+
+Until those land, the honest description of EGG-API is: a hardened,
+well-tested façade for GLAM backends that still expects a Python-literate
+operator for the initial install. The rest of this README describes that
+reality. Progress toward the desktop story is tracked in
+[CHANGELOG.md](./CHANGELOG.md) and the SPECS.
 
 ---
 
@@ -74,7 +112,7 @@ No terminal, no YAML hand-editing, no DevOps rotation. Install, configure, expos
 | **Admin API** | Config CRUD, validation, test-query + `/admin/v1/debug/translate` (DSL preview), paginated `/admin/v1/usage`, `/admin/v1/storage/stats` |
 | **Observability** | Prometheus `/metrics` (auth-gated in prod), structured JSON logs with `request_id` / `key_id` / `trace_id` / `span_id` / `latency_ms`; opt-in OpenTelemetry via `EGG_OTEL_ENDPOINT` |
 | **Storage** | SQLite state DB with hot-path indexes; versioned migrations (`egg-api migrate`); background retention purge |
-| **Backends** | Elasticsearch (7+) or OpenSearch (1+) via `backend.type`; `BackendAdapter` Protocol for adding new backends (see `docs/backends.md`) |
+| **Backends** | Elasticsearch (7+) or OpenSearch (1+) via `backend.type`; `BackendAdapter` Protocol for adding new backends (see `docs/backends.md`). Solr is planned (`app/TODO.md`). |
 
 ---
 
@@ -168,7 +206,7 @@ The first `egg-api init` on a fresh machine will either honour `EGG_BOOTSTRAP_AD
 | `egg-api check-backend` | Probe the configured backend for reachability |
 | `egg-api print-paths` | Show effective config / state-db / bootstrap-key paths |
 
-Equivalent `make` targets (`make setup`, `make init`, `make run`, `make check-config`, `make check-backend`, `make print-paths`, `make test`) are provided for convenience.
+Equivalent `make` targets (`make setup`, `make init`, `make dev` for the auto-reload loop, `make run` for a production-style local start, `make check-config`, `make check-backend`, `make print-paths`, `make test`) are provided for convenience.
 
 ---
 
@@ -181,6 +219,7 @@ Config lives in a single YAML file (default: `config/egg.yaml`). A fully annotat
 ```yaml
 backend:          # Where to talk to the search engine
 storage:          # Where the SQLite state DB lives
+schema_profile:   # library | museum | archive | custom (default: library)
 security_profile: # Name of the profile applied to public requests
 profiles:         # Declared profiles (prudent, standard, your-own…)
 auth:             # Admin bootstrap, cookie hardening, session TTL
@@ -192,6 +231,24 @@ allowed_facets:   # Facet allowlist
 allowed_include_fields:  # Fields that may appear in include_fields
 mapping:          # Public field → backend source rules
 ```
+
+The `schema_profile` knob (Sprint 23 + 26) widens the public Record
+shape when the deployment needs it:
+- `museum` adds `museum: { inventory_number, artist, medium, dimensions,
+  acquisition_date, current_location }` and enables the IIIF passthrough
+  at `/v1/manifest/{id}` when `links.iiif_manifest` is mapped.
+- `archive` adds `archive: { unit_id, unit_level, extent, repository,
+  scope_content, access_conditions, parent_id }` — populated by EAD
+  imports (Sprint 26) or by any backend that can surface those fields.
+- `library` keeps the lean shape (`id, type, title, description,
+  creators`).
+- `custom` disables the auto-suggest hints for operators who want to
+  drive every mapping rule by hand.
+
+Mapping keys may use a dotted form (`museum.inventory_number`,
+`archive.scope_content`, `links.iiif_manifest`) to feed the sub-blocks;
+an empty sub-block is dropped from the response so a library deployment
+never sees a stray `museum: {}` or `archive: {}`.
 
 ### Security profile
 
@@ -305,9 +362,26 @@ All responses are JSON. Errors follow SPECS §19:
 | `GET /v1/facets` | Facet counts only (aggregations via `size=0`) |
 | `GET /v1/collections` | Collections the service exposes |
 | `GET /v1/schema` | Active public schema + allowlists |
-| `GET /v1/suggest` | **501** (declared for SPECS §12.2; implementation pending) |
-| `GET /v1/manifest/{id}` | **501** (declared for SPECS §12.3; implementation pending) |
+| `GET /v1/suggest` | Autocomplete over a title-like field (SPECS §12.2) |
 | `GET /v1/openapi.json` | OpenAPI 3 schema |
+| `GET /v1/manifest/{id}` | 302 redirect to the record's IIIF manifest (museum profile) |
+| `GET /v1/oai` | OAI-PMH 2.0 provider (Sprint 27) |
+
+> **OAI-PMH provider (Sprint 27)** — EGG now re-exposes its own indexed
+> content as an OAI-PMH endpoint so aggregators (Europeana, Gallica,
+> Isidore, BASE, OpenAIRE, CollEx) can harvest from it. Unauthenticated
+> by protocol contract, Dublin Core (`oai_dc`) metadataPrefix, supports
+> the six verbs + resumption tokens for paging. Try
+> `GET /v1/oai?verb=Identify` or
+> `GET /v1/oai?verb=ListRecords&metadataPrefix=oai_dc`.
+
+> **IIIF passthrough (Sprint 23)** — when the museum schema profile maps
+> `links.iiif_manifest` to a backend field, `GET /v1/manifest/{id}` returns
+> a `302` redirect to the upstream manifest URL the institution already
+> hosts. EGG-API never proxies, parses or re-serves the manifest itself,
+> so it stays out of the IIIF hosting business while keeping the
+> `/v1/manifest/{id}` URI shape that IIIF clients expect. Returns `404`
+> when the record is missing or has no manifest URL.
 
 ### Example — search
 
@@ -346,11 +420,29 @@ All admin routes require `x-api-key: <admin-key>`.
 | `POST /admin/v1/test-query` | Translate a query to backend DSL without running it |
 | `GET  /admin/v1/usage?limit=&offset=` | Paginated usage events |
 | `GET  /admin/v1/status` | Backend + mapping health aggregate |
+| `GET  /admin/v1/keys` | List every API key (never returns the raw secret) |
+| `POST /admin/v1/keys` | Create a key. Returns the raw secret **once** |
+| `GET  /admin/v1/keys/{key_id}` | Fetch a single key's public record |
+| `PATCH /admin/v1/keys/{key_id}` | `{"action": "activate\|suspend\|revoke\|rotate"}` |
+| `DELETE /admin/v1/keys/{key_id}` | Soft-delete: revoke + invalidate sessions |
+| `GET  /admin/v1/logs?…` | Filterable structured-log query (SPECS §13.12) |
+| `GET  /admin/v1/export-config` | Dump the active config as redacted YAML |
+| `POST /admin/v1/import-config` | Validate + swap to a new config body (JSON) |
 
 ### Example
 
 ```bash
 curl -s -H "x-api-key: $ADMIN_KEY" http://127.0.0.1:8000/admin/v1/status | jq
+
+# Create a partner key and capture the one-time secret.
+curl -s -X POST -H "x-api-key: $ADMIN_KEY" -H 'content-type: application/json' \
+     -d '{"key_id": "partner_a"}' \
+     http://127.0.0.1:8000/admin/v1/keys | jq
+
+# Rotate it later; the new secret is returned in the response body.
+curl -s -X PATCH -H "x-api-key: $ADMIN_KEY" -H 'content-type: application/json' \
+     -d '{"action": "rotate"}' \
+     http://127.0.0.1:8000/admin/v1/keys/partner_a | jq
 ```
 
 ---
@@ -360,7 +452,57 @@ curl -s -H "x-api-key: $ADMIN_KEY" http://127.0.0.1:8000/admin/v1/status | jq
 Same-origin console at `/admin/*`, served by Jinja2 templates (autoescape enforced):
 
 - `/admin/login` — bootstrap form (rate-limited).
+- `/admin/setup-otp/{token}` — one-time magic-link login minted by
+  `egg-api start` (Sprint 16). Single-use, 5-minute TTL, hashed at
+  rest. Use the CLI instead of hand-crafting URLs.
 - `/admin/ui` — dashboard (service + backend health, usage summary).
+- `/admin/ui/setup` — **setup wizard** (8 steps, SPECS §26): a guided
+  flow covering backend → source → mapping → security → exposure →
+  first public key → live test → review & publish. Step 1 includes a
+  *Detect a backend on this machine* button that probes loopback +
+  common docker-compose hostnames in parallel so the operator rarely
+  has to type a URL. Extend the allowlist via `EGG_DISCOVERY_HOSTS`
+  when ES lives on a known internal hostname. Nothing reaches
+  `config/egg.yaml` until the operator clicks *Publish*; drafts are
+  per-admin and survive disconnects.
+- `/admin/ui/imports` — **Data imports** (Sprint 22-26): connect your
+  library, museum or archive catalogue (Koha, PMB, AtoM, Axiell,
+  MuseumPlus, TMS, Micromusée, Mobydoc, CollectionSpace, Orphée,
+  Aleph, Symphony, Mnesys, Ligeo, ArchivesSpace, PLEADE, …) to
+  EGG-API and harvest records into the active backend. Nine importer
+  kinds are available:
+  - **OAI-PMH — Dublin Core** (S22): universal SIGB/OAI protocol.
+  - **OAI-PMH — LIDO** (S24): same protocol with the LIDO museum
+    metadata prefix. Maps into the museum schema profile.
+  - **OAI-PMH — MARCXML** (S25): for catalogues that expose
+    MARCXML over OAI (typical of Aleph / Symphony / Koha). Flavor
+    (MARC21 / UNIMARC) chosen per source.
+  - **OAI-PMH — EAD** (S26): archive finding aids over OAI. One
+    OAI record expands to many backend documents (archdesc root
+    + every component); each carries a `parent_id` pointer.
+  - **LIDO — flat XML file** (S24): absolute filesystem path, no
+    OAI envelope.
+  - **MARC — binary `.mrc` (ISO 2709)** (S25): the raw MARC
+    export format. Supports MARC21 and UNIMARC flavors without
+    `pymarc` — the parser is stdlib-only.
+  - **MARCXML — flat XML file** (S25): MARCXML without OAI.
+  - **CSV — flat spreadsheet** (S25): save from Excel /
+    LibreOffice as UTF-8 CSV, name one column `id`, EGG ingests.
+    Semicolon, tab and comma dialects are all sniffed; plural
+    columns (`creators`, `subject`, …) accept the `|` separator.
+  - **EAD — flat XML file** (S26): archive finding aids (EAD 2002
+    or EAD3) served up as a single XML file. Same tree expansion
+    as the OAI variant.
+
+  Every source can carry an optional **Run schedule** (``hourly`` /
+  ``every 6 hours`` / ``daily`` / ``weekly``; Sprint 27). A
+  background polling thread picks due sources automatically — set
+  the cadence once and EGG keeps the catalogue fresh without the
+  operator touching the button. ``EGG_SCHEDULER=off`` disables the
+  polling loop per deployment; ``EGG_SCHEDULER_TICK_SECONDS`` tunes
+  how often it polls (default ``60``).
+- `/admin/ui/help` — glossary of the technical terms used across the
+  console, written for non-technical operators.
 - `/admin/ui/config` — editable configuration form.
 - `/admin/ui/mapping` — mapping and allowlists overview.
 - `/admin/ui/keys` — create / suspend / revoke API keys.
@@ -482,26 +624,31 @@ EGG-API/
 
 ### V1 (shipped)
 
-- Elasticsearch adapter, read-only.
-- Public `/v1/*` with query-policy enforcement.
+- Elasticsearch **and OpenSearch** adapters, read-only.
+- Public `/v1/*` with query-policy enforcement, including `/v1/suggest`.
 - Admin `/admin/v1/*` and operator UI under `/admin/*`.
 - YAML configuration with cross-field validation.
 - SQLite state (keys, sessions, quotas, usage) with hot-path indexes.
 - Security hardening (see [Security model](#security-model)).
-- Prometheus metrics + structured JSON logs.
-- HTTP response caching with ETag / 304.
+- Prometheus metrics + structured JSON logs + opt-in OpenTelemetry.
+- HTTP response caching with ETag / 304; JSON-LD and CSV output flavours.
+- Rate limiting (in-memory by default, Redis opt-in).
 
-### Declared but not implemented
+### Retired in v1.0.0, restored in Sprint 23
 
-- `/v1/suggest` — autocomplete (SPECS §12.2).
-- `/v1/manifest/{id}` — IIIF passthrough/redirect (SPECS §12.3).
+- `GET /v1/manifest/{id}` was retired in v1.0.0 and **restored in
+  Sprint 23** as a thin `302` redirect (not a proxy) to the record's
+  `links.iiif_manifest` value. Available when the deployment uses the
+  `museum` schema profile and maps a manifest URL on the backend
+  record. See CHANGELOG.
 
 ### Out of scope for V1
 
-- OpenSearch and Solr adapters.
+- Solr adapter (planned, tracked in `app/TODO.md`).
 - Multi-tenant isolation.
 - Deep-pagination workarounds (`search_after` / PIT).
 - Native MCP server (SPECS explicitly lists this as future work).
+- Bundled desktop installer (see [Current delivery & desktop roadmap](#current-delivery--desktop-roadmap)).
 
 Follow-ups for these are tracked in [CHANGELOG.md](./CHANGELOG.md) and the SPECS.
 

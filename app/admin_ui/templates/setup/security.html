@@ -1,0 +1,51 @@
+{% extends "setup/_layout.html" %}
+{% block wizard %}
+<div class="panel">
+  <h3>Step 4 — Security profile</h3>
+  <p class="help">
+    A security profile caps how much a public caller can ask for in a
+    single request (page size, number of facets, pagination depth).
+    <strong>Prudent</strong> is the default — pick <strong>Standard</strong>
+    only when you know your backend handles bigger queries well.
+  </p>
+
+  <form class="stack" method="post" action="/admin/ui/setup/security">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+
+    <label>
+      <input type="radio" name="security_profile" value="prudent"
+        {% if draft.security_profile == 'prudent' %}checked{% endif %} />
+      <strong>Prudent</strong> — page size ≤ 20, max 3 facets, pagination capped. Recommended for new deployments.
+    </label>
+    <label>
+      <input type="radio" name="security_profile" value="standard"
+        {% if draft.security_profile == 'standard' %}checked{% endif %} />
+      <strong>Standard</strong> — page size ≤ 100, 5 facets. Suitable for established aggregator partners.
+    </label>
+
+    <fieldset>
+      <legend>Who can call the public API?</legend>
+      <label>
+        <input type="radio" name="public_mode" value="anonymous_allowed"
+          {% if draft.public_mode == 'anonymous_allowed' %}checked{% endif %} />
+        Anyone (no key required). Good for a broad public catalogue.
+      </label>
+      <label>
+        <input type="radio" name="public_mode" value="api_key_optional"
+          {% if draft.public_mode == 'api_key_optional' %}checked{% endif %} />
+        Optional key — callers may pass an API key for higher limits.
+      </label>
+      <label>
+        <input type="radio" name="public_mode" value="api_key_required"
+          {% if draft.public_mode == 'api_key_required' %}checked{% endif %} />
+        Required key — every call needs a valid API key.
+      </label>
+    </fieldset>
+
+    <div class="actions">
+      <button type="submit" name="action" value="next">Save &amp; next</button>
+      <a href="/admin/ui/setup/mapping"><button type="button" class="secondary">Back</button></a>
+    </div>
+  </form>
+</div>
+{% endblock %}

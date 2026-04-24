@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Setup wizard</h2>
+<p class="help">
+  Walk through three guided steps to connect a backend, pick a source,
+  and propose a field mapping. Nothing is saved to the active config
+  until you reach the last screen.
+</p>
+
+<div class="panel" id="language-pick">
+  <h3>Interface language / Langue de l'interface</h3>
+  <p class="help">
+    Pick the default language for the admin console and the public
+    landing page. Every visitor can still override via the switcher in
+    the header. / Choisissez la langue par défaut de la console et de
+    la page d'accueil publique. Chaque visiteur pourra quand même
+    basculer via le sélecteur en haut à droite.
+  </p>
+  <form class="inline-form" method="post" action="/admin/ui/setup/language">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    {% set current_lang = cfg.default_language or 'en' %}
+    <label>
+      <input type="radio" name="lang" value="en"
+             {% if current_lang == 'en' %}checked{% endif %} /> English
+    </label>
+    <label>
+      <input type="radio" name="lang" value="fr"
+             {% if current_lang == 'fr' %}checked{% endif %} /> Français
+    </label>
+    <button type="submit">Save / Enregistrer</button>
+  </form>
+</div>
+
+{% if has_active_config %}
+<div class="panel">
+  <h3>An active configuration already exists</h3>
+  <p>The wizard will prepare a new configuration in a draft. The current
+  service keeps running on the existing config until you publish the
+  new one.</p>
+  <ul>
+    <li>Active backend: <code class="muted">{{ cfg.backend.url or '(empty)' }}</code></li>
+    <li>Active source: <code class="muted">{{ cfg.backend.index or '(empty)' }}</code></li>
+  </ul>
+</div>
+{% endif %}
+
+{% if draft_exists %}
+<div class="panel">
+  <h3>Resume your previous draft</h3>
+  <p class="help">You started a wizard session earlier. You can continue where you left off, or start over.</p>
+  <form class="inline-form" method="post" action="/admin/ui/setup/reset">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <a href="/admin/ui/setup/{{ current_step }}"><button type="button">Resume at step: {{ current_step }}</button></a>
+    <button type="submit" class="secondary">Discard draft and start over</button>
+  </form>
+</div>
+{% else %}
+<form class="inline-form" method="post" action="/admin/ui/setup/start">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+  <button type="submit">Start the wizard</button>
+</form>
+{% endif %}
+{% endblock %}

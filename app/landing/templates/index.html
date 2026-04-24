@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="{{ lang }}">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{ brand }} — {{ t("landing.hero.title") }}</title>
+  <link rel="stylesheet" href="/landing-static/landing.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">{{ brand }} <span class="tag">v{{ version }}</span></div>
+    <nav>
+      <a href="/admin/ui">{{ t("landing.nav.console") }}</a>
+      <a href="/v1/oai?verb=Identify">{{ t("landing.nav.oai") }}</a>
+      <a href="/v1/openapi.json">{{ t("landing.nav.openapi") }}</a>
+      <a href="/about">{{ t("landing.nav.about") }}</a>
+      <span class="lang-switch" aria-label="{{ t('lang.switch_to') }}">
+        {% for code in supported_langs %}
+          {% if code == lang %}
+            <strong>{{ t("lang." ~ code) }}</strong>
+          {% else %}
+            <a href="?lang={{ code }}">{{ t("lang." ~ code) }}</a>
+          {% endif %}
+          {% if not loop.last %} · {% endif %}
+        {% endfor %}
+      </span>
+    </nav>
+  </header>
+
+  <section class="hero">
+    <h1>{{ t("landing.hero.title") }}</h1>
+    <p class="lead">{{ t("landing.hero.lead") }}</p>
+    <a class="cta" href="/admin/ui/setup">{{ t("landing.cta.setup") }}</a>
+    <a class="cta secondary" href="/admin/ui">{{ t("landing.cta.console") }}</a>
+  </section>
+
+  <div class="container">
+    <div class="grid">
+      <div class="card">
+        <h3>{{ t("landing.status.heading") }}</h3>
+        <p>
+          {{ t("landing.status.service") }}: <span class="status-pill {{ status.live_class }}">{{ status.live_label }}</span><br/>
+          {{ t("landing.status.backend") }}: <span class="status-pill {{ status.backend_class }}">{{ status.backend_label }}</span>
+        </p>
+      </div>
+      <div class="card">
+        <h3>{{ t("landing.card.public_api.heading") }}</h3>
+        <p>
+          <a href="/v1/search">/v1/search</a> ·
+          <a href="/v1/schema">/v1/schema</a> ·
+          <a href="/v1/openapi.json">/v1/openapi.json</a>
+        </p>
+      </div>
+      <div class="card">
+        <h3>{{ t("landing.card.oai.heading") }}</h3>
+        <p>
+          {{ t("landing.card.oai.body") }}
+          <a href="/v1/oai?verb=Identify">/v1/oai?verb=Identify</a>
+        </p>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>{{ t("landing.who.heading") }}</h2>
+      <p>{{ t("landing.who.body") }}</p>
+    </div>
+
+    <div class="section">
+      <h2>{{ t("landing.profiles.heading") }}</h2>
+      <div class="profiles">
+        {% if lang == "fr" %}
+          <div class="profile"><strong>Library</strong> — schéma Dublin Core épuré
+            (<code>id, type, title, description, creators</code>). Convient à Koha,
+            PMB, Orphée, Aleph et à tout catalogue OAI-PMH.</div>
+          <div class="profile"><strong>Museum</strong> — ajoute un bloc
+            <code>museum</code> (numéro d'inventaire, artiste, médium, dimensions,
+            date d'acquisition, localisation courante) et active la redirection
+            IIIF. Convient à Axiell, TMS, Micromusée, Mobydoc.</div>
+          <div class="profile"><strong>Archive</strong> — ajoute un bloc
+            <code>archive</code> (identifiant de l'unité, niveau, métrage,
+            institution, portée &amp; contenu, conditions d'accès, identifiant
+            parent). Convient à AtoM, Mnesys, Ligeo, ArchivesSpace, PLEADE.</div>
+        {% else %}
+          <div class="profile"><strong>Library</strong> — lean Dublin Core shape
+            (<code>id, type, title, description, creators</code>). Fits Koha,
+            PMB, Orphée, Aleph and every OAI-PMH catalogue.</div>
+          <div class="profile"><strong>Museum</strong> — adds a
+            <code>museum</code> sub-block (inventory number, artist, medium,
+            dimensions, acquisition date, current location) and enables an
+            IIIF manifest passthrough. Fits Axiell, TMS, Micromusée, Mobydoc.</div>
+          <div class="profile"><strong>Archive</strong> — adds an
+            <code>archive</code> sub-block (unit id, unit level, extent,
+            repository, scope &amp; content, access conditions, parent id).
+            Fits AtoM, Mnesys, Ligeo, ArchivesSpace, PLEADE.</div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>{{ t("landing.importers.heading") }}</h2>
+      {% if lang == "fr" %}
+      <ul>
+        <li><strong>OAI-PMH — Dublin Core</strong> : voie universelle SIGB/OAI.</li>
+        <li><strong>OAI-PMH — LIDO</strong> : musées via leur DAMS.</li>
+        <li><strong>OAI-PMH — MARCXML</strong> : bibliothèques exposant MARC via OAI.</li>
+        <li><strong>OAI-PMH — EAD</strong> : instruments de recherche archivistiques via OAI.</li>
+        <li><strong>Fichier LIDO</strong> : exports XML ponctuels.</li>
+        <li><strong>MARC binaire (.mrc, ISO 2709)</strong> + <strong>MARCXML fichier</strong> avec variantes MARC21 ou UNIMARC.</li>
+        <li><strong>Fichier EAD</strong> : EAD 2002 et EAD3.</li>
+        <li><strong>Tableur CSV</strong> : enregistrez en CSV UTF-8 avec une colonne <code>id</code>, EGG ingère.</li>
+      </ul>
+      {% else %}
+      <ul>
+        <li><strong>OAI-PMH — Dublin Core</strong>: universal SIGB/OAI path.</li>
+        <li><strong>OAI-PMH — LIDO</strong>: museums via their DAMS.</li>
+        <li><strong>OAI-PMH — MARCXML</strong>: libraries exposing MARC over OAI.</li>
+        <li><strong>OAI-PMH — EAD</strong>: archive finding aids over OAI.</li>
+        <li><strong>LIDO flat file</strong>: one-shot XML dumps.</li>
+        <li><strong>MARC binary (.mrc, ISO 2709)</strong> + <strong>MARCXML file</strong> with MARC21 or UNIMARC flavors.</li>
+        <li><strong>EAD flat file</strong>: EAD 2002 and EAD3.</li>
+        <li><strong>CSV spreadsheet</strong>: save as UTF-8 CSV with an <code>id</code> column, EGG ingests.</li>
+      </ul>
+      {% endif %}
+      <p>{{ t("landing.importers.schedule") }}</p>
+    </div>
+
+    <div class="section">
+      <h2>{{ t("landing.not.heading") }}</h2>
+      {% if lang == "fr" %}
+      <ul>
+        <li>Pas un site grand public ni une interface de découverte — c'est
+          l'API JSON sous le front-end que vous utilisez déjà (ou que votre
+          prestataire construira par-dessus).</li>
+        <li>Pas un moteur d'indexation — il se place devant votre moteur de
+          recherche (Elasticsearch, OpenSearch) et en expose une vue propre.</li>
+        <li>Pas un SGC — votre SIGB / DAMS / CMS d'archives reste la source
+          de vérité ; EGG-API se contente de republier.</li>
+      </ul>
+      {% else %}
+      <ul>
+        <li>Not an end-user website or a discovery front-end — it is the JSON
+          API underneath whichever front-end you already use (or the one a
+          prestataire builds on top).</li>
+        <li>Not an indexing engine — it sits in front of your existing search
+          backend (Elasticsearch, OpenSearch) and exposes a curated shape.</li>
+        <li>Not a content management system — your SIGB/DAMS/archives CMS
+          stays the source of truth; EGG-API just republishes.</li>
+      </ul>
+      {% endif %}
+    </div>
+
+    <div class="section">
+      <h2>{{ t("landing.next.heading") }}</h2>
+      {% if lang == "fr" %}
+      <ul>
+        <li><a href="/admin/ui/setup">Lancez l'assistant</a> — détecte votre
+          backend, propose un mapping, vous aide à publier une première config.</li>
+        <li><a href="/admin/ui/imports">Connectez une source d'import</a> —
+          catalogue OAI-PMH, export MARC, export LIDO, instrument de recherche
+          EAD ou CSV.</li>
+        <li><a href="/v1/oai?verb=Identify">Publiez votre endpoint OAI</a> auprès
+          des agrégateurs pour qu'ils puissent vous moissonner directement.</li>
+      </ul>
+      {% else %}
+      <ul>
+        <li><a href="/admin/ui/setup">Run the setup wizard</a> — detects your
+          backend, proposes a mapping, helps you publish a first config.</li>
+        <li><a href="/admin/ui/imports">Connect an import source</a> — OAI-PMH
+          catalogue, MARC dump, LIDO DAMS export, EAD finding aid, or CSV.</li>
+        <li><a href="/v1/oai?verb=Identify">Advertise your OAI endpoint</a> to
+          aggregators so they can harvest you directly.</li>
+      </ul>
+      {% endif %}
+    </div>
+  </div>
+
+  <footer>
+    {{ brand }} v{{ version }} · {{ t("landing.footer.tagline") }}
+  </footer>
+</body>
+</html>

@@ -15,3 +15,16 @@ th, td { border: 1px solid #ddd; padding: 0.5rem; text-align: left; font-size: 0
 .success { background: #e7f8e7; border: 1px solid #83cf83; padding: 0.6rem; }
 .error { background: #fdeaea; border: 1px solid #e79f9f; padding: 0.6rem; }
 .secret-box { background: #fff8dd; border: 1px solid #e6cc6e; padding: 0.7rem; margin: 0.8rem 0; }
+
+/* --- Setup wizard (Sprint 14) -------------------------------------------- */
+.wizard-steps { display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap; }
+.wizard-steps .step { padding: 0.3rem 0.7rem; border: 1px solid #ccc; background: #fff; border-radius: 999px; font-size: 0.85rem; color: #666; }
+.wizard-steps .step.current { background: #1557b0; color: #fff; border-color: #1557b0; }
+.wizard-steps .step.done { background: #e7f8e7; border-color: #83cf83; color: #1f6b1f; }
+.help { color: #555; font-size: 0.85rem; margin: 0.15rem 0 0; }
+.field-row { display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 0.6rem; align-items: center; padding: 0.4rem 0; border-bottom: 1px solid #eee; }
+.field-row small { color: #666; }
+.panel { background: #fff; border: 1px solid #ddd; border-radius: 6px; padding: 1rem; margin-bottom: 1rem; }
+.actions { display: flex; gap: 0.5rem; margin-top: 1rem; }
+.actions .secondary { background: #f0f0f0; color: #333; border: 1px solid #bbb; }
+code.muted { background: #eee; padding: 0.1rem 0.3rem; border-radius: 3px; font-size: 0.85rem; }

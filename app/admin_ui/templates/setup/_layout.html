@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Setup wizard</h2>
+
+<ol class="wizard-steps">
+  {% set labels = {
+    'backend': '1. Backend',
+    'source': '2. Source',
+    'mapping': '3. Mapping',
+    'security': '4. Security',
+    'exposure': '5. Exposure',
+    'keys': '6. Keys',
+    'test': '7. Test',
+    'done': '8. Publish'
+  } %}
+  {% set order = ['backend', 'source', 'mapping', 'security', 'exposure', 'keys', 'test', 'done'] %}
+  {% for name in order %}
+    {% set cls = 'step' %}
+    {% if name == current_step %}{% set cls = cls + ' current' %}{% endif %}
+    {% if order.index(name) < order.index(current_step) %}{% set cls = cls + ' done' %}{% endif %}
+    <li class="{{ cls }}">{{ labels[name] }}</li>
+  {% endfor %}
+</ol>
+
+{% if message %}<p class="success">{{ message }}</p>{% endif %}
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
+
+{% block wizard %}{% endblock %}
+{% endblock %}

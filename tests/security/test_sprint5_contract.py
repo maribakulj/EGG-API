@@ -121,12 +121,14 @@ def test_s5_3_cache_control_private_for_api_key_modes(client, admin_headers) -> 
 # ---------------------------------------------------------------------------
 
 
-def test_s5_5_manifest_route_absent_from_openapi(client) -> None:
-    # /v1/manifest/{id} stays retired (no backend plumbing). /v1/suggest
-    # came back in Sprint 8 S8.3 with a real ES-backed implementation.
+def test_s5_5_manifest_route_returns_redirect_when_mapped(client) -> None:
+    # Sprint 23 restored /v1/manifest/{record_id} as a 302 redirect to the
+    # per-record IIIF manifest (when ``links.iiif_manifest`` is mapped).
+    # This is no longer a forbidden path; assert the OpenAPI surface
+    # describes it as a public endpoint instead of being absent.
     schema = client.get("/v1/openapi.json").json()
     paths = schema.get("paths", {})
-    assert not any(p.startswith("/v1/manifest") for p in paths)
+    assert "/v1/manifest/{record_id}" in paths
 
 
 def test_s5_5_suggest_returns_200_when_backed(client) -> None:

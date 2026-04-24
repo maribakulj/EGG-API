@@ -35,6 +35,7 @@ def build_adapter(config: AppConfig) -> BackendAdapter:
             retry_backoff_cap_seconds=backend.retry_backoff_cap_seconds,
             retry_deadline_seconds=backend.retry_deadline_seconds,
             max_buckets_per_facet=profile.max_buckets_per_facet,
+            auth_config=backend.auth,
         )
     if backend.type == "opensearch":
         return OpenSearchAdapter(
@@ -46,6 +47,7 @@ def build_adapter(config: AppConfig) -> BackendAdapter:
             retry_backoff_cap_seconds=backend.retry_backoff_cap_seconds,
             retry_deadline_seconds=backend.retry_deadline_seconds,
             max_buckets_per_facet=profile.max_buckets_per_facet,
+            auth_config=backend.auth,
         )
     # BackendType is a Literal, so this branch is unreachable at runtime;
     # keeping the raise makes the factory robust to future additions to

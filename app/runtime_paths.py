@@ -4,6 +4,7 @@ import contextlib
 import os
 import secrets
 import stat
+import sys
 from pathlib import Path
 
 DEFAULT_HOME_DIR = Path(".")
@@ -13,6 +14,35 @@ DEFAULT_BOOTSTRAP_KEY_FILE = Path("data/bootstrap_admin.key")
 DEFAULT_CSRF_KEY_FILE = Path("data/csrf_signing.key")
 
 LEGACY_INSECURE_BOOTSTRAP_KEY = "admin-change-me"
+
+
+def desktop_home_dir() -> Path:
+    """Return the OS-native user-data directory for the desktop bundle.
+
+    Matches what operators expect from a packaged app:
+
+    - Windows: ``%APPDATA%\\EGG-API`` (with a safe fallback),
+    - macOS:   ``~/Library/Application Support/EGG-API``,
+    - Linux:   ``$XDG_DATA_HOME/egg-api`` or ``~/.local/share/egg-api``.
+
+    The CLI flow keeps honouring the plain working directory so an
+    ``egg-api init`` in a checkout still writes to ``./config`` /
+    ``./data``. The Briefcase launcher sets ``EGG_HOME`` to this
+    value before importing the app, which means every other module
+    goes through :func:`get_home_dir` and picks the override up.
+    """
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "EGG-API"
+    if os.name == "nt":
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            return Path(appdata) / "EGG-API"
+        return Path.home() / "AppData" / "Roaming" / "EGG-API"
+    # Linux + other POSIX (BSD, etc.)
+    xdg_data_home = os.environ.get("XDG_DATA_HOME")
+    if xdg_data_home:
+        return Path(xdg_data_home) / "egg-api"
+    return Path.home() / ".local" / "share" / "egg-api"
 
 
 def get_home_dir() -> Path:
@@ -154,3 +184,58 @@ def get_bootstrap_admin_key(config_value: str) -> str:
     """Backwards-compatible wrapper returning only the key (legacy callers)."""
     key, _ = resolve_bootstrap_admin_key(config_value)
     return key
+
+
+# Env vars operators commonly use to declare a worker count.  We read all
+# three because different process managers pick different conventions:
+# gunicorn's ``$WEB_CONCURRENCY``, uvicorn/systemd's ``$UVICORN_WORKERS``,
+# and ``$EGG_WORKERS`` as an explicit EGG-specific override.
+_WORKER_ENV_VARS: tuple[str, ...] = ("EGG_WORKERS", "WEB_CONCURRENCY", "UVICORN_WORKERS")
+
+
+def declared_worker_count() -> int:
+    """Return the operator-declared worker count (best-effort; defaults to 1).
+
+    Only honored for env vars that parse cleanly as a positive integer.
+    A malformed value is treated as "unknown" rather than crashing boot.
+    """
+    for name in _WORKER_ENV_VARS:
+        raw = os.getenv(name, "").strip()
+        if not raw:
+            continue
+        try:
+            value = int(raw)
+        except ValueError:
+            continue
+        if value > 0:
+            return value
+    return 1
+
+
+def check_rate_limit_worker_safety() -> None:
+    """Refuse to boot with a multi-worker config but no shared rate limiter.
+
+    The in-memory limiter is per-process: with N workers an attacker
+    effectively gets N times the published quota, making the rate limit
+    advertised in the docs a lie.  Require an explicit
+    ``EGG_RATE_LIMIT_REDIS_URL`` in production, warn in development.
+    """
+    workers = declared_worker_count()
+    if workers <= 1:
+        return
+    if os.getenv("EGG_RATE_LIMIT_REDIS_URL", "").strip():
+        return
+    message = (
+        f"EGG-API was started with {workers} workers but no "
+        "EGG_RATE_LIMIT_REDIS_URL is configured. The in-memory rate limiter "
+        "is per-process, so every worker has its own counter — the effective "
+        "public limit is silently multiplied by the worker count. "
+        "Either set EGG_RATE_LIMIT_REDIS_URL to a reachable Redis, or run "
+        "with a single worker."
+    )
+    if is_production():
+        raise RuntimeError(message)
+    # Dev: loud warning on stderr, but don't block the CLI loop.
+    import sys
+
+    sys.stderr.write(f"[EGG-API] WARNING: {message}\n")

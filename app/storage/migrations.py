@@ -122,6 +122,130 @@ def _m005_api_keys_hash_variant(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE api_keys ADD COLUMN hash_variant TEXT NOT NULL DEFAULT 'sha256'")
 
 
+def _m006_setup_drafts(conn: sqlite3.Connection) -> None:
+    """Sprint 14: per-admin setup wizard draft storage.
+
+    One row per ``key_id`` (the public admin label). The wizard persists
+    its state here so an operator can step out of the flow and resume
+    later, and so a brief screen refresh does not wipe progress. The
+    draft is NOT a config: nothing here reaches ``egg.yaml`` until the
+    final step calls ``container.reload()``.
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS setup_drafts (
+            key_id TEXT PRIMARY KEY,
+            payload TEXT NOT NULL,
+            step TEXT NOT NULL DEFAULT 'backend',
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+
+
+def _m007_setup_otps(conn: sqlite3.Connection) -> None:
+    """Sprint 16: one-time tokens for the first-run magic link.
+
+    ``egg-api start`` mints an OTP that, when exchanged at
+    ``/admin/setup-otp/<token>``, issues a fresh admin UI session
+    without forcing the operator to copy-paste the bootstrap key into
+    the login form. Tokens are single-use, short-lived (5 minutes by
+    default) and hashed at rest — the raw value is only ever shown
+    to the terminal that minted it.
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS setup_otps (
+            token_hash TEXT PRIMARY KEY,
+            key_id TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            consumed_at TEXT
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_setup_otps_expires ON setup_otps(expires_at)")
+
+
+def _m008_ui_sessions_last_activity(conn: sqlite3.Connection) -> None:
+    """Sprint 18: track per-session last-activity timestamp for idle timeout.
+
+    The TTL column already caps absolute session lifetime. Idle
+    timeout is a different policy: kick the session after N minutes
+    without a real request. Legacy rows get their ``created_at`` as
+    the initial ``last_activity_at`` so the first request after the
+    migration does not look anomalously old.
+    """
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(ui_sessions)").fetchall()}
+    if "last_activity_at" not in cols:
+        conn.execute("ALTER TABLE ui_sessions ADD COLUMN last_activity_at TEXT")
+        conn.execute(
+            "UPDATE ui_sessions SET last_activity_at = created_at WHERE last_activity_at IS NULL"
+        )
+
+
+def _m009_import_sources_and_runs(conn: sqlite3.Connection) -> None:
+    """Sprint 22: persistent import sources + run history.
+
+    One row per configured upstream (OAI-PMH endpoint, LIDO file
+    drop, CSV profile, ...). Each run appends to ``import_runs`` so
+    the admin dashboard can show the last ingestion status + a
+    history for debugging. ``kind`` is the discriminator so future
+    importers (MARC, LIDO, CSV, EAD) can share the same tables.
+    """
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS import_sources (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            label TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            url TEXT,
+            metadata_prefix TEXT,
+            set_spec TEXT,
+            schema_profile TEXT NOT NULL DEFAULT 'library',
+            created_at TEXT NOT NULL,
+            last_run_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS import_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_id INTEGER NOT NULL,
+            started_at TEXT NOT NULL,
+            ended_at TEXT,
+            status TEXT NOT NULL,
+            records_ingested INTEGER NOT NULL DEFAULT 0,
+            records_failed INTEGER NOT NULL DEFAULT 0,
+            error_message TEXT,
+            FOREIGN KEY(source_id) REFERENCES import_sources(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_import_runs_source ON import_runs(source_id, started_at DESC);
+        """
+    )
+
+
+def _m010_import_sources_schedule(conn: sqlite3.Connection) -> None:
+    """Sprint 27: cron-like scheduling for import sources.
+
+    ``schedule`` is an enum string (``hourly`` / ``6h`` / ``daily`` /
+    ``weekly``) or ``NULL`` for manual-only sources. ``next_run_at`` is
+    the absolute ISO timestamp the scheduler uses to pick due sources
+    without re-computing cadence on every poll. Using ``ALTER TABLE``
+    keeps the column addition idempotent even on databases that were
+    upgraded one migration at a time.
+    """
+
+    existing = {row["name"] for row in conn.execute("PRAGMA table_info(import_sources)")}
+    if "schedule" not in existing:
+        conn.execute("ALTER TABLE import_sources ADD COLUMN schedule TEXT")
+    if "next_run_at" not in existing:
+        conn.execute("ALTER TABLE import_sources ADD COLUMN next_run_at TEXT")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_import_sources_next_run "
+        "ON import_sources(next_run_at) WHERE next_run_at IS NOT NULL"
+    )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(1, "baseline", _m001_baseline),
     Migration(2, "ui_sessions_expires_at", _m002_ui_sessions_expires_at),
@@ -132,6 +256,11 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(3, "ui_sessions_wipe_pre_hash", _m003_ui_sessions_wipe_pre_hash),
     Migration(4, "retire_quota_counters", _m004_retire_quota_counters),
     Migration(5, "api_keys_hash_variant", _m005_api_keys_hash_variant),
+    Migration(6, "setup_drafts", _m006_setup_drafts),
+    Migration(7, "setup_otps", _m007_setup_otps),
+    Migration(8, "ui_sessions_last_activity", _m008_ui_sessions_last_activity),
+    Migration(9, "import_sources_and_runs", _m009_import_sources_and_runs),
+    Migration(10, "import_sources_schedule", _m010_import_sources_schedule),
 )
 
 
@@ -167,6 +296,10 @@ def _baseline_pre_existing_db(conn: sqlite3.Connection, applied: set[int]) -> se
       - If `ui_sessions.expires_at` column exists, baseline 2 is applied.
       - If `quota_counters` does not exist, 4 is applied.
       - If `api_keys.hash_variant` column exists, 5 is applied.
+      - If `setup_drafts` exists, 6 is applied.
+      - If `setup_otps` exists, 7 is applied.
+      - If `ui_sessions.last_activity_at` column exists, 8 is applied.
+      - If `import_sources` exists, 9 is applied.
     """
     if applied:
         return applied
@@ -190,6 +323,16 @@ def _baseline_pre_existing_db(conn: sqlite3.Connection, applied: set[int]) -> se
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(api_keys)").fetchall()}
         if "hash_variant" in cols:
             baselined.add(5)
+    if _has_table("setup_drafts"):
+        baselined.add(6)
+    if _has_table("setup_otps"):
+        baselined.add(7)
+    if _has_table("ui_sessions"):
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(ui_sessions)").fetchall()}
+        if "last_activity_at" in cols:
+            baselined.add(8)
+    if _has_table("import_sources"):
+        baselined.add(9)
 
     if baselined:
         now = datetime.now(timezone.utc).isoformat()

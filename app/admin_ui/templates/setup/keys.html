@@ -1,0 +1,46 @@
+{% extends "setup/_layout.html" %}
+{% block wizard %}
+<div class="panel">
+  <h3>Step 6 — First public API key</h3>
+  <p class="help">
+    Every external integration gets its own labelled key. This is a
+    good time to mint the first one (e.g. for a partner aggregator or
+    your own front-end). You can skip this step if your profile allows
+    anonymous access.
+  </p>
+
+  {% if draft.first_key %}
+    <div class="secret-box">
+      <p><strong>Key created: {{ draft.first_key.key_id }}</strong></p>
+      {% if draft.first_key.key %}
+      <p>Secret (copy now, it will not be shown again):</p>
+      <p><code>{{ draft.first_key.key }}</code></p>
+      {% else %}
+      <p class="help">The secret was shown on its creation and is no longer available here.</p>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  {% if not draft.first_key %}
+  <form class="stack" method="post" action="/admin/ui/setup/keys">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <label>
+      Key label
+      <input name="key_id" required placeholder="partner_a" />
+      <p class="help">Letters, digits, dot, underscore or dash. 1-64 chars. Used in logs and dashboards — never shown to end users.</p>
+    </label>
+    <div class="actions">
+      <button type="submit" name="action" value="create">Create API key</button>
+      <button type="submit" name="action" value="skip" class="secondary">Skip this step</button>
+      <a href="/admin/ui/setup/exposure"><button type="button" class="secondary">Back</button></a>
+    </div>
+  </form>
+  {% else %}
+  <form class="inline-form" method="post" action="/admin/ui/setup/keys">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <button type="submit" name="action" value="next">Continue</button>
+    <a href="/admin/ui/setup/exposure"><button type="button" class="secondary">Back</button></a>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}
