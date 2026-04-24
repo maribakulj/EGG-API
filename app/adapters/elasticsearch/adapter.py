@@ -373,16 +373,21 @@ class ElasticsearchAdapter:
             filter_clauses.append({"term": {"has_digital": query.has_digital}})
         if query.has_iiif is not None:
             filter_clauses.append({"term": {"has_iiif": query.has_iiif}})
-        # Date range on the canonical ``date`` public field. Operators whose
-        # backend uses a different physical name declare an ES field alias
-        # at the index level; the adapter stays schema-agnostic.
-        if query.date_from or query.date_to:
-            range_bounds: dict[str, Any] = {}
-            if query.date_from:
-                range_bounds["gte"] = query.date_from
-            if query.date_to:
-                range_bounds["lte"] = query.date_to
-            filter_clauses.append({"range": {"date": range_bounds}})
+        # Interval-overlap semantics on ``date.start`` / ``date.end``:
+        # a record whose own [start, end] window intersects the caller's
+        # [date_from, date_to] is a match. Patrimonial records carry
+        # messy free-form ``date`` strings ("vers 1880", "XVIIIe siècle")
+        # that a flat ``range`` on ``date`` cannot query correctly, so
+        # we target the normalized sub-fields of the public
+        # :class:`~app.schemas.record.DateInfo`. Backends whose index
+        # only carries a scalar ``date`` field need a one-line ES
+        # mapping alias (``date.start``/``date.end`` pointing at their
+        # existing field) to participate. Two clauses let ES optimize
+        # each range independently.
+        if query.date_to:
+            filter_clauses.append({"range": {"date.start": {"lte": query.date_to}}})
+        if query.date_from:
+            filter_clauses.append({"range": {"date.end": {"gte": query.date_from}}})
 
         size = size_override if size_override is not None else query.page_size
         bucket_size = max(1, int(bucket_size_default))

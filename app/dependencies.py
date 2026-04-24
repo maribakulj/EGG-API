@@ -128,6 +128,36 @@ class Container:
         config_manager = ConfigManager(require_existing=False)
         self._state: ContainerState = _build_state(config_manager)
         self._public_lockout = _build_public_lockout(config_manager.config)
+        # Monotonic counter bumped whenever a backend write commits. Public
+        # ETags fold it into their value, so a successful import automatically
+        # rotates every cached 304 without the caller having to track
+        # per-query freshness. Kept outside ``ContainerState`` because it
+        # must survive config reloads — the index did not suddenly become
+        # stale just because the operator saved a new YAML.
+        self._index_epoch = 0
+        self._index_epoch_lock = threading.Lock()
+
+    @property
+    def index_epoch(self) -> int:
+        """Current backend-write epoch; folded into public weak ETags."""
+        return self._index_epoch
+
+    def ingest(self, docs: list[dict[str, Any]]) -> tuple[int, int]:
+        """Index ``docs`` via the adapter and bump the ETag epoch on success.
+
+        Every backend write path (scheduler, manual ``Run now``, future
+        UI upload) should go through this helper rather than calling
+        ``adapter.bulk_index`` directly — that is how ``/v1/search``
+        responses served from the cache layer stay fresh after an
+        import cycle. The epoch bump is conditional on at least one
+        successfully ingested document to avoid rotating ETags when a
+        whole batch failed (no state actually changed).
+        """
+        ingested, failed = self.adapter.bulk_index(docs)
+        if ingested > 0:
+            with self._index_epoch_lock:
+                self._index_epoch += 1
+        return ingested, failed
 
     @property
     def public_lockout(self) -> PublicAuthLockout:

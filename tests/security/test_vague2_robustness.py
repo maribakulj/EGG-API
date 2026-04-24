@@ -236,7 +236,9 @@ def test_h4_if_none_match_weak_comparison_accepts_stripped_prefix(client) -> Non
 def test_h4_records_emit_etag(client) -> None:
     response = client.get("/v1/records/abc")
     assert response.status_code == 200
-    assert response.headers.get("ETag") == 'W/"record:abc"'
+    etag = response.headers.get("ETag") or ""
+    # Weak ETag carries the record id + current index-write epoch.
+    assert etag.startswith('W/"record:abc:v')
 
 
 def test_h4_facets_emit_etag(client) -> None:

@@ -31,12 +31,20 @@ sprint — incremental delete propagation is a Sprint 27 concern.
 from __future__ import annotations
 
 import logging
+
+# Parser/type split: ``fromstring`` comes from ``defusedxml`` (blocks
+# billion-laughs, quadratic-blowup and external-entity / XXE attacks),
+# while the ``Element`` / ``ParseError`` types still come from stdlib
+# because defusedxml re-exports only the parser entry points. OAI-PMH
+# endpoints are admin-configured but can be untrusted or compromised
+# third parties, so we treat their payloads as hostile by default.
+import xml.etree.ElementTree as ET
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import Any
-from xml.etree import ElementTree as ET
 
 import httpx
+from defusedxml.ElementTree import fromstring as _safe_fromstring
 
 from app.errors import AppError
 
@@ -167,12 +175,13 @@ def dc_record_to_doc(header: ET.Element, metadata: ET.Element | None) -> dict[st
 
 
 def _parse_response(xml_body: bytes) -> ET.Element:
-    # Stdlib ``xml.etree`` is not a safe XML parser against billion-laughs
-    # attacks; OAI-PMH endpoints are admin-configured and generally trusted,
-    # but document the choice so reviewers know we considered it.
+    # defusedxml raises ``EntitiesForbidden``/``EntityBomb`` (subclass of
+    # ``ValueError``) on XML bombs, and ``ET.ParseError`` on malformed
+    # XML. We surface both as a single 502 so the caller doesn't need
+    # to know which hostile shape the upstream was sending.
     try:
-        return ET.fromstring(xml_body)  # noqa: S314
-    except ET.ParseError as exc:
+        return _safe_fromstring(xml_body)
+    except (ET.ParseError, ValueError) as exc:
         raise AppError(
             "backend_unavailable",
             f"OAI-PMH response is not valid XML: {exc}",
@@ -205,7 +214,11 @@ def identify(
     """
     close_after = False
     if client is None:
-        client = httpx.Client(timeout=timeout, follow_redirects=True)
+        # ``follow_redirects=False`` blocks SSRF via OAI-PMH redirects to
+        # internal addresses (matches the Elasticsearch adapter's policy).
+        # Operators whose endpoint relies on redirects must resolve the
+        # final URL in their source config.
+        client = httpx.Client(timeout=timeout, follow_redirects=False)
         close_after = True
     try:
         try:
@@ -268,7 +281,11 @@ def iter_records(
     parser: RecordParser = record_parser or dc_record_to_doc
     close_after = False
     if client is None:
-        client = httpx.Client(timeout=timeout, follow_redirects=True)
+        # ``follow_redirects=False`` blocks SSRF via OAI-PMH redirects to
+        # internal addresses (matches the Elasticsearch adapter's policy).
+        # Operators whose endpoint relies on redirects must resolve the
+        # final URL in their source config.
+        client = httpx.Client(timeout=timeout, follow_redirects=False)
         close_after = True
     try:
         params: dict[str, str] = {"verb": "ListRecords", "metadataPrefix": metadata_prefix}

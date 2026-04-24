@@ -7,7 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Architecture
+
+- **ADR 002 — Separation between EGG-API runtime and document
+  compiler** ([docs/adr-002-compiler-separation.md](./docs/adr-002-compiler-separation.md)).
+  EGG-API is scoped as a publication runtime; advanced semantic
+  transformation (rich LIDO / EAD / MARC mapping, Linked Art, CIDOC
+  CRM, patrimonial date normalisation, agent fusion) is delegated
+  to an optional external document compiler. The built-in
+  ``app/importers/`` are declared in maintenance — they stay
+  functional as a zero-dependency fallback for simple deployments
+  but do not grow new field coverage. README gains a short
+  "Scope boundary" section pointing at the ADR, and
+  ``app/importers/__init__.py`` carries a matching contributor-
+  facing scope-freeze note. No code moved; this is a contract
+  between future contributors and the project's roadmap.
+
 ### Security
+
+- **Maturity pass — follow-up hardening (second review iteration).**
+  - **XML parsing through ``defusedxml``**. OAI-PMH, LIDO, EAD and
+    MARCXML importers now parse via ``defusedxml.ElementTree``, which
+    blocks billion-laughs / quadratic-blowup / external-entity (XXE)
+    attacks. Stdlib ``xml.etree.ElementTree`` is still imported for
+    the ``Element`` / ``ParseError`` types (defusedxml re-exports only
+    parser entry points). ``defusedxml`` is now a runtime dependency.
+  - **OAI-PMH httpx clients set ``follow_redirects=False``**,
+    consistent with the Elasticsearch adapter's SSRF posture. Operators
+    whose endpoint redirects must resolve the final URL in their source
+    configuration.
 
 - **Maturity pass — closed four gaps surfaced by an external review.**
   - ``GET /admin/v1/config`` no longer leaks ``auth.bootstrap_admin_key``,
@@ -53,6 +81,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   their actual computation (query-key hash, not body hash).
   ``If-None-Match`` comparison strips the ``W/`` prefix so both flavors
   match, in line with the weak-comparison rule in §2.3.2.
+- **ETags rotate automatically on ingest**. A new ``Container.ingest``
+  helper wraps the adapter's ``bulk_index`` call and bumps a monotonic
+  ``index_epoch`` on every batch that commits at least one record.
+  Public ETags fold that epoch in as a ``:vN`` suffix, so a successful
+  scheduled run or manual ``Run now`` rotates every cached 304 — no
+  more staleness window bounded only by ``cache.public_max_age_seconds``.
+- **Date range filter queries the interval-overlap sub-fields**
+  (``date.start`` / ``date.end``) of the public ``DateInfo`` model
+  instead of a single flat ``date`` field. Patrimonial dates are often
+  free-form ("vers 1880", "XVIIIe siècle") and cannot be range-queried
+  on a scalar column. A caller asking for ``date_from=2020-01-01&date_to=2024-12-31``
+  now gets every record whose own [start, end] interval intersects
+  that window. Backends indexed with only a flat date field need a
+  one-line ES mapping alias (``date.start``/``date.end`` → existing
+  scalar) to participate.
 - **Docker build no longer fails on an excluded README.** The
   ``.dockerignore`` ``*.md`` glob now carries a ``!README.md``
   exception — setuptools needs the file at build time because

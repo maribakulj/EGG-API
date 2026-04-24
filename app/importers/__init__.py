@@ -18,6 +18,20 @@ dispatcher both the admin REST API (``/admin/v1/imports/{id}/run``)
 and the admin UI call to execute an import, so the mapping of
 ``ImportSource.kind`` → concrete ingest call lives in exactly one
 place.
+
+Scope freeze (see docs/adr-002-compiler-separation.md)
+------------------------------------------------------
+These are **lightweight built-in importers**. They extract flat
+fields for a straight bulk-index into the backend; they deliberately
+do **not** build a semantic model (events, agents with roles,
+normalised patrimonial dates, Linked Art projection, CIDOC CRM
+alignment). Advanced format transformation is delegated to the
+external document compiler described in ADR 002.
+
+For contributors: if you are about to add a new field mapping to
+LIDO / EAD / MARC here — stop and ask whether it belongs in the
+compiler instead. The built-in importers are in maintenance: bug
+fixes welcome, new semantic coverage is not.
 """
 
 from __future__ import annotations
