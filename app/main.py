@@ -112,7 +112,10 @@ async def _lifespan(_: FastAPI):
 
         scheduler = Scheduler(
             store=container.store,
-            bulk_index=container.adapter.bulk_index,
+            # Go through ``container.ingest`` instead of the raw adapter
+            # call so a successful scheduled run bumps the ETag epoch and
+            # clients see fresh data at the next /v1/search.
+            bulk_index=container.ingest,
             tick_seconds=float(os.getenv("EGG_SCHEDULER_TICK_SECONDS", "60") or 60),
         )
         scheduler.start()

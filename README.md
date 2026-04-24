@@ -72,6 +72,26 @@ in admin endpoints all have regression tests. Tracking the real
 feature-by-feature state lives in [CHANGELOG.md](./CHANGELOG.md); read
 that before making purchasing or deployment decisions.
 
+### Scope boundary: publication, not transformation
+
+EGG-API is a **publication runtime**: it serves a public API over an
+existing index, runs an admin UI, schedules imports, caches responses,
+tracks usage. It is *not* a semantic transformation engine. Advanced
+format conversion (rich LIDO / EAD / MARC mapping, Linked Art JSON-LD,
+CIDOC CRM alignment, patrimonial date normalisation, agent fusion)
+will be delegated to an **optional external document compiler** — a
+separate project communicating with EGG via a CLI subprocess or HTTP
+sidecar, never an in-process dependency. The built-in LIDO / EAD /
+MARC importers in ``app/importers/`` stay at their current
+"extract flat fields" level as a zero-dependency fallback; they are
+in maintenance and do not grow new field coverage.
+
+The rationale and the full list of what stays in Python vs. what
+moves to the compiler lives in
+[docs/adr-002-compiler-separation.md](./docs/adr-002-compiler-separation.md).
+This is the contract contributors should read before adding semantic
+features to ``app/schemas/``, ``app/mappers/`` or ``app/importers/``.
+
 ---
 
 ## Table of contents
@@ -104,7 +124,7 @@ that before making purchasing or deployment decisions.
 | **Pagination** | `page` + `page_size` under `max_depth`; opaque `cursor` (base64 of `search_after`) above it, with `next_cursor` in the response |
 | **Query policy** | Unknown-param rejection, sort/facet/field allowlists, hard caps on `q`/filter/`include_fields`, strict boolean parsing |
 | **Mapping** | 9 modes (`direct`, `constant`, `split_list`, `first_non_empty`, `template`, `nested_object`, `date_parser`, `boolean_cast`, `url_passthrough`) with dispatch-dict handlers |
-| **Caching** | `Cache-Control` + strong `ETag` + `If-None-Match` → `304`; `private` when auth is required, `public` when anonymous is allowed |
+| **Caching** | `Cache-Control` + **weak** `ETag` (`W/"…"`, derived from the normalized query + index epoch) + `If-None-Match` → `304`; `private` when auth is required, `public` when anonymous is allowed. A successful ingest bumps the index epoch so cached 304s rotate automatically. |
 | **Security profiles** | Ship with `prudent` and `standard`; add your own via config |
 | **Auth modes** | Public: `anonymous_allowed` / `api_key_optional` / `api_key_required`; Admin: API key always required; optional HMAC pepper for stored hashes (`EGG_API_KEY_PEPPER`) |
 | **Rate limiting** | Per-subject limiter for public traffic (in-memory by default, Redis opt-in via `EGG_RATE_LIMIT_REDIS_URL`); dedicated per-IP limiter on `/admin/login` |
@@ -466,12 +486,14 @@ Same-origin console at `/admin/*`, served by Jinja2 templates (autoescape enforc
   when ES lives on a known internal hostname. Nothing reaches
   `config/egg.yaml` until the operator clicks *Publish*; drafts are
   per-admin and survive disconnects.
-- `/admin/ui/imports` — **Data imports** (Sprint 22-26): connect your
-  library, museum or archive catalogue (Koha, PMB, AtoM, Axiell,
-  MuseumPlus, TMS, Micromusée, Mobydoc, CollectionSpace, Orphée,
-  Aleph, Symphony, Mnesys, Ligeo, ArchivesSpace, PLEADE, …) to
-  EGG-API and harvest records into the active backend. Nine importer
-  kinds are available:
+- `/admin/ui/imports` — **Data imports** (Sprint 22-26): harvest
+  records into the active backend from the exchange formats commonly
+  produced by library, museum and archive software (Koha, PMB, AtoM,
+  Axiell, MuseumPlus, TMS, Micromusée, Mobydoc, CollectionSpace,
+  Orphée, Aleph, Symphony, Mnesys, Ligeo, ArchivesSpace, PLEADE, …).
+  EGG does **not** ship native connectors for those products — it
+  reads the OAI-PMH / MARC / LIDO / EAD / CSV exports they already
+  expose. Nine importer kinds are available:
   - **OAI-PMH — Dublin Core** (S22): universal SIGB/OAI protocol.
   - **OAI-PMH — LIDO** (S24): same protocol with the LIDO museum
     metadata prefix. Maps into the museum schema profile.
@@ -648,9 +670,13 @@ EGG-API/
 
 - Solr adapter (planned, tracked in `app/TODO.md`).
 - Multi-tenant isolation.
-- Deep-pagination workarounds (`search_after` / PIT).
+- **Point-in-Time** pagination. ES ``search_after`` ships today behind
+  the opaque ``cursor`` token; PIT (held-open consistent snapshots
+  across many pages) remains future work.
 - Native MCP server (SPECS explicitly lists this as future work).
-- Bundled desktop installer (see [Current delivery & desktop roadmap](#current-delivery--desktop-roadmap)).
+- **Signed** desktop installer. The unsigned Briefcase bundle is
+  available experimentally under *Current delivery*; signing +
+  notarisation are not in scope for V1.
 
 Follow-ups for these are tracked in [CHANGELOG.md](./CHANGELOG.md) and the SPECS.
 

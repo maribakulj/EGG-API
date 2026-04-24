@@ -30,11 +30,19 @@ importers and manual configurations share a single ingest shape.
 from __future__ import annotations
 
 import logging
+
+# Parser/type split: parsing goes through ``defusedxml`` (billion-laughs,
+# quadratic-blowup, XXE all blocked); ``Element`` / ``ParseError`` types
+# still come from stdlib because defusedxml only re-exports the parser
+# entry points. LIDO payloads may come from an untrusted harvest run or
+# a DAMS export of unknown hardening status.
+import xml.etree.ElementTree as ET
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from xml.etree import ElementTree as ET
+
+from defusedxml.ElementTree import fromstring as _safe_fromstring
 
 from app.errors import AppError
 
@@ -265,12 +273,9 @@ def parse_lido_bytes(data: bytes) -> Iterator[dict[str, Any]]:
     are not well-formed XML — the caller records that on the import run.
     """
 
-    # ``ET.fromstring`` is not safe against billion-laughs attacks; LIDO
-    # dumps come from admin-configured sources (DAMS export, local file
-    # upload) so we accept the risk and document it explicitly.
     try:
-        root = ET.fromstring(data)  # noqa: S314
-    except ET.ParseError as exc:
+        root = _safe_fromstring(data)
+    except (ET.ParseError, ValueError) as exc:
         raise AppError(
             "backend_unavailable",
             f"LIDO file is not valid XML: {exc}",

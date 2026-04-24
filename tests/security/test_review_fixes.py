@@ -137,36 +137,86 @@ def test_r1_translate_query_sort_survives_cursor_transition(
 
 
 # ---------------------------------------------------------------------------
-# R2 — Date range filter
+# R2 — Date range filter (interval-overlap on date.start / date.end)
 # ---------------------------------------------------------------------------
 
 
-def test_r2_date_from_becomes_range_filter(adapter: ElasticsearchAdapter) -> None:
+def test_r2_date_from_filters_on_interval_end(adapter: ElasticsearchAdapter) -> None:
+    # "records whose interval ends at or after 2020-01-01" — matches any
+    # record with ``date.end >= 2020-01-01``.
     body = adapter.translate_query(NormalizedQuery(q="x", date_from="2020-01-01"))
     filters = body["query"]["bool"]["filter"]
-    assert {"range": {"date": {"gte": "2020-01-01"}}} in filters
+    assert {"range": {"date.end": {"gte": "2020-01-01"}}} in filters
+    # date.start clause must be absent when only the lower bound is set.
+    assert not any("date.start" in f.get("range", {}) for f in filters)
 
 
-def test_r2_date_to_becomes_range_filter(adapter: ElasticsearchAdapter) -> None:
+def test_r2_date_to_filters_on_interval_start(adapter: ElasticsearchAdapter) -> None:
+    # "records whose interval starts at or before 2024-12-31" — matches
+    # any record with ``date.start <= 2024-12-31``.
     body = adapter.translate_query(NormalizedQuery(q="x", date_to="2024-12-31"))
     filters = body["query"]["bool"]["filter"]
-    assert {"range": {"date": {"lte": "2024-12-31"}}} in filters
+    assert {"range": {"date.start": {"lte": "2024-12-31"}}} in filters
+    assert not any("date.end" in f.get("range", {}) for f in filters)
 
 
-def test_r2_date_from_and_to_combine_in_single_range(
+def test_r2_date_from_and_to_emit_both_overlap_clauses(
     adapter: ElasticsearchAdapter,
 ) -> None:
     body = adapter.translate_query(
         NormalizedQuery(q="x", date_from="2020-01-01", date_to="2024-12-31")
     )
     filters = body["query"]["bool"]["filter"]
-    assert {"range": {"date": {"gte": "2020-01-01", "lte": "2024-12-31"}}} in filters
+    # Two separate clauses so ES can optimize each range independently.
+    assert {"range": {"date.start": {"lte": "2024-12-31"}}} in filters
+    assert {"range": {"date.end": {"gte": "2020-01-01"}}} in filters
 
 
 def test_r2_no_date_filter_when_bounds_absent(adapter: ElasticsearchAdapter) -> None:
     body = adapter.translate_query(NormalizedQuery(q="x"))
     filters = body["query"]["bool"]["filter"]
     assert not any("range" in f for f in filters)
+
+
+# ---------------------------------------------------------------------------
+# R-new — ETag index epoch rotates cached 304s after a successful ingest
+# ---------------------------------------------------------------------------
+
+
+def test_etag_folds_in_index_epoch(client: TestClient) -> None:
+    response = client.get("/v1/search?q=x")
+    etag = response.headers["ETag"]
+    # Weak ETag carries the ``:v{epoch}`` suffix so every call that the
+    # cache layer treats as equivalent is also scoped to the current
+    # backend-write epoch.
+    assert etag.startswith('W/"search:')
+    assert f":v{container.index_epoch}" in etag
+
+
+def test_ingest_bumps_index_epoch_and_rotates_etag(client: TestClient) -> None:
+    # 1. Capture the ETag for a given query.
+    before = client.get("/v1/search?q=x").headers["ETag"]
+    epoch_before = container.index_epoch
+
+    # 2. Simulate a successful backend write via the ingestion helper.
+    ingested, _ = container.ingest([{"id": "probe-1", "type": "record", "title": "Probe"}])
+    assert ingested >= 1, "FakeAdapter must report at least one ingested doc"
+    assert container.index_epoch == epoch_before + 1
+
+    # 3. The same query now serves a different ETag — the client's old
+    # ``If-None-Match`` header will no longer match, so the browser
+    # re-fetches instead of reading a stale 304 from cache.
+    after = client.get("/v1/search?q=x").headers["ETag"]
+    assert before != after
+    assert f":v{container.index_epoch}" in after
+
+
+def test_failed_ingest_does_not_bump_epoch(client: TestClient) -> None:
+    # An empty batch commits nothing — the epoch must stay put so
+    # bench-marking / retry loops don't uselessly rotate caches.
+    epoch_before = container.index_epoch
+    container.ingest([])
+    assert container.index_epoch == epoch_before
 
 
 # ---------------------------------------------------------------------------

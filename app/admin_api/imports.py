@@ -194,7 +194,10 @@ def run_source(source_id: int) -> RunResult:
 
     run_id = container.store.start_import_run(source_id)
     try:
-        result = run_import(src, bulk_index=container.adapter.bulk_index)
+        # ``container.ingest`` wraps ``adapter.bulk_index`` and bumps the
+        # ETag epoch on success, so public /v1/search results stop being
+        # served from a stale 304 after a manual ``Run now``.
+        result = run_import(src, bulk_index=container.ingest)
     except ValueError as exc:
         container.store.finish_import_run(
             run_id,

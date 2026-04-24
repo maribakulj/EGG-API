@@ -32,11 +32,18 @@ file we have to read.
 from __future__ import annotations
 
 import logging
+
+# MARC binary is parsed by hand further down. The MARCXML path routes
+# through ``defusedxml`` so OAI-PMH harvests cannot trigger billion-laughs
+# or external-entity (XXE) expansion. Stdlib ElementTree stays imported
+# for the ``Element`` / ``ParseError`` types defusedxml does not re-export.
+import xml.etree.ElementTree as ET
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from xml.etree import ElementTree as ET
+
+from defusedxml.ElementTree import fromstring as _safe_fromstring
 
 from app.errors import AppError
 
@@ -277,8 +284,8 @@ def iter_marcxml_records(data: bytes) -> Iterator[MarcRecord]:
     """Parse a MARCXML ``<collection>`` or bare ``<record>`` blob."""
 
     try:
-        root = ET.fromstring(data)  # noqa: S314 — admin-configured input
-    except ET.ParseError as exc:
+        root = _safe_fromstring(data)
+    except (ET.ParseError, ValueError) as exc:
         raise AppError(
             "backend_unavailable",
             f"MARCXML file is not valid XML: {exc}",

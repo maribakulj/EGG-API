@@ -10,10 +10,15 @@ the *request shape* (normalized query key, record id) rather than a hash
 of the response body. That gives semantic equivalence across equivalent
 requests without committing to byte-level identity — which would require
 hashing the rendered body and defeat the fast-path win of 304 responses
-for unchanged queries. If the backend index changes between two calls
-with the same query, the ETag stays the same within a single cache TTL
-window; operators who need stricter freshness should lower
-``CacheConfig.public_max_age_seconds`` or disable caching entirely.
+for unchanged queries.
+
+Staleness is bounded by the ``index_epoch`` counter on the DI container:
+every successful backend write (``Container.ingest``) bumps it, and
+every public ETag folds it in as a ``:vN`` suffix. So an ingest rotates
+*every* cached 304 atomically — clients transparently re-fetch the
+next call. Operators who want an even tighter window (sub-ingest
+freshness) should lower ``CacheConfig.public_max_age_seconds`` or
+disable caching entirely.
 
 The ``Cache-Control`` directive follows the auth mode:
 

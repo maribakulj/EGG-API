@@ -123,7 +123,10 @@ def search(
         )
 
     nq = container.policy.parse(request)
-    etag = f'W/"search:{fmt}:{container.policy.compute_cache_key(nq)}"'
+    # ``index_epoch`` rotates whenever an ingest commits, so a cached 304
+    # never outlives the backend state it was computed against. See
+    # ``app.http_cache`` for the weak-ETag contract.
+    etag = f'W/"search:{fmt}:{container.policy.compute_cache_key(nq)}:v{container.index_epoch}"'
     cached = apply_cache_headers(request, response, etag)
     if cached is not None:
         return cached
@@ -220,7 +223,7 @@ def get_record(
     JSON shape documented in the :class:`~app.schemas.record.Record`
     component.
     """
-    etag = f'W/"record:{record_id}"'
+    etag = f'W/"record:{record_id}:v{container.index_epoch}"'
     cached = apply_cache_headers(request, response, etag)
     if cached is not None:
         return cached
@@ -252,7 +255,7 @@ def facets(
 ):
     """Return facet counts only (no hits), useful for sidebar UIs."""
     nq = container.policy.parse(request)
-    etag = f'W/"facets:{container.policy.compute_cache_key(nq)}"'
+    etag = f'W/"facets:{container.policy.compute_cache_key(nq)}:v{container.index_epoch}"'
     cached = apply_cache_headers(request, response, etag)
     if cached is not None:
         return cached

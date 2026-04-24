@@ -22,19 +22,24 @@ component carries a ``parent_id`` pointer so clients can rebuild
 the hierarchy without the importer having to flatten or denormalise
 it.
 
-Like Sprint 24-25, no heavyweight deps: stdlib
-``xml.etree.ElementTree`` is enough for EAD's mild structural
-needs.
+EAD's structural needs are mild enough for an ElementTree-style
+parser; we still route parsing through ``defusedxml`` so hostile or
+malformed finding aids (billion-laughs, quadratic-blowup, XXE) cannot
+blow up the importer. Stdlib ``xml.etree.ElementTree`` stays imported
+for the ``Element`` / ``ParseError`` types, which defusedxml does not
+re-export.
 """
 
 from __future__ import annotations
 
 import logging
+import xml.etree.ElementTree as ET
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from xml.etree import ElementTree as ET
+
+from defusedxml.ElementTree import fromstring as _safe_fromstring
 
 from app.errors import AppError
 
@@ -299,8 +304,8 @@ def parse_ead_bytes(data: bytes) -> Iterator[dict[str, Any]]:
     """Parse an in-memory EAD XML payload and yield backend docs."""
 
     try:
-        root = ET.fromstring(data)  # noqa: S314 — admin-configured input
-    except ET.ParseError as exc:
+        root = _safe_fromstring(data)
+    except (ET.ParseError, ValueError) as exc:
         raise AppError(
             "backend_unavailable",
             f"EAD file is not valid XML: {exc}",
