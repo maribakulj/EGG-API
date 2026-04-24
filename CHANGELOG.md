@@ -7,6 +7,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Maturity pass — closed four gaps surfaced by an external review.**
+  - ``GET /admin/v1/config`` no longer leaks ``auth.bootstrap_admin_key``,
+    ``backend.auth.password`` and ``backend.auth.token`` in the clear. The
+    redaction policy previously applied only to the YAML save path is now
+    shared with the live-introspection path via
+    ``ConfigManager.redact(data, mask=True|False)``: ``mask=True``
+    replaces non-empty secrets with ``"***"`` (admins still see whether
+    a secret is configured), ``mask=False`` removes them entirely (used
+    for on-disk persistence and ``/admin/v1/export-config``).
+  - The public ``/v1/openapi.json`` now strips ``/admin/*`` paths and
+    the ``admin`` tag so anonymous callers cannot fingerprint the
+    operator surface. Operators who need the full schema hit the new
+    ``/admin/v1/openapi.json`` with their admin key. This is a
+    **breaking change** on the public OpenAPI contract — the
+    ``tests/snapshots/openapi_paths.json`` drifts from 67 entries to
+    14 (public-only).
+
+### Fixed
+
+- **Cursor pagination bootstraps from the first page.** The
+  Elasticsearch adapter now always emits a stable ``sort`` clause
+  (primary ordering + ``_id`` tie-breaker), so ``hit.sort`` is
+  populated on the very first ``/v1/search`` response and the route
+  can return a usable ``next_cursor`` to the caller without requiring
+  an initial cursor — which was the chicken-and-egg bug that made
+  cursor pagination unreachable on a real Elasticsearch backend.
+- **``sort``, ``date_from``, ``date_to``, ``include_fields`` are now
+  actually applied.** The policy layer validated them but the ES
+  adapter ignored all four, so the API was accepting parameters it
+  pretended to honor:
+  - ``sort`` translates the symbolic ``<field>_asc``/``<field>_desc``
+    convention from ``config.allowed_sorts`` (and the reserved
+    ``relevance`` alias) into the ES sort clause, always followed by
+    ``{"_id": "asc"}`` as a stable tie-breaker.
+  - ``date_from`` / ``date_to`` become a ``range`` filter on the
+    canonical ``date`` field.
+  - ``include_fields`` is applied post-mapping as a sparse-fieldset
+    filter on the JSON response (keeping structural ``id`` + ``type``).
+    CSV and JSON-LD keep their full shapes — the first has fixed
+    columns by design, the second needs the complete ``@context`` map.
+- **ETags are now marked weak (``W/"…"``) per RFC 7232** to match
+  their actual computation (query-key hash, not body hash).
+  ``If-None-Match`` comparison strips the ``W/`` prefix so both flavors
+  match, in line with the weak-comparison rule in §2.3.2.
+- **Docker build no longer fails on an excluded README.** The
+  ``.dockerignore`` ``*.md`` glob now carries a ``!README.md``
+  exception — setuptools needs the file at build time because
+  ``pyproject.toml`` declares it as the project ``readme``.
+- **Wheel installs now ship every template and static asset.** The
+  ``package-data`` glob widens from ``admin_ui/templates/*.html`` to
+  ``admin_ui/templates/**/*.html`` + ``admin_ui/static/**/*`` +
+  ``landing/templates/**/*.html`` + ``landing/static/**/*``. Nested
+  setup-wizard templates and the landing page bundle now travel with
+  the wheel and the Docker image.
+- **Dockerfile pins Python 3.12-slim** (matching the CI matrix
+  ceiling) instead of ``python:3.14-slim`` which did not track any CI
+  target.
+
 ### Added
 
 - **Sprint 30 — Deployment-wide language picker + polish** closes the

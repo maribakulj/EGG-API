@@ -36,8 +36,15 @@ def create_config(payload: dict[str, object] = Body(default_factory=dict)) -> di
 
 @router.get("/config")
 def get_config() -> dict[str, object]:
-    """Return the current configuration (secrets redacted)."""
-    return container.config_manager.config.model_dump(mode="python")
+    """Return the current configuration with secrets masked.
+
+    Admins see which secrets are configured (``"***"`` sentinel) without
+    receiving the cleartext values. The canonical redaction registry
+    lives on :class:`ConfigManager` and is shared with the YAML save
+    path so the two cannot drift.
+    """
+    data = container.config_manager.config.model_dump(mode="python")
+    return container.config_manager.redact(data, mask=True)
 
 
 @router.put("/config")
@@ -164,9 +171,7 @@ def export_config() -> PlainTextResponse:
     into ``POST /admin/v1/import-config`` on a peer node.
     """
     cfg_dict = container.config_manager.config.model_dump(mode="python")
-    # Keep the method module-local so we do not leak the "redact"
-    # API; it's intentionally private to ConfigManager.
-    redacted = container.config_manager._redact(cfg_dict)
+    redacted = container.config_manager.redact(cfg_dict, mask=False)
     body = yaml.safe_dump(redacted, sort_keys=False)
     headers = {"content-disposition": "attachment; filename=egg-config.yaml"}
     return PlainTextResponse(
@@ -204,6 +209,17 @@ def import_config(request: Request, payload: dict[str, object] | None = Body(def
         ) from exc
     container.reload(cfg)
     return {"status": "imported"}
+
+
+@router.get("/openapi.json")
+def admin_openapi_json(request: Request) -> dict[str, object]:
+    """Return the full OpenAPI schema, including ``/admin/*`` paths.
+
+    The public ``/v1/openapi.json`` filters admin paths out so anonymous
+    callers cannot fingerprint the operator surface; admins with a valid
+    key get the unfiltered view here for debugging and integration work.
+    """
+    return request.app.openapi()
 
 
 @router.get("/storage/stats")

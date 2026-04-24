@@ -84,7 +84,16 @@ exclude_lines = [
 include = ["app*"]
 
 [tool.setuptools.package-data]
-app = ["admin_ui/static/*.css", "admin_ui/templates/*.html"]
+# Jinja templates and static assets live inside the ``app`` package so
+# they travel with the wheel and Docker image. Globs cover nested
+# directories (e.g. ``admin_ui/templates/setup/*.html``) and future
+# asset types (js, images) without a manifest edit.
+app = [
+  "admin_ui/templates/**/*.html",
+  "admin_ui/static/**/*",
+  "landing/templates/**/*.html",
+  "landing/static/**/*",
+]
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]

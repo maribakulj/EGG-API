@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import stat
 from pathlib import Path
+from typing import ClassVar
 
 import yaml
 from pydantic import ValidationError
@@ -37,19 +38,36 @@ class ConfigManager:
         self._config = AppConfig.model_validate(data)
         return self._config
 
-    # Config keys that must never be serialized to the YAML file. Secrets should be
-    # provided via environment variable or a 0600 sidecar file instead.
-    _REDACTED_KEYS: tuple[tuple[str, ...], ...] = (
+    # Config keys that must never leave the process in cleartext. Operators
+    # pin secrets via ``*_env`` sidecar references; inline values are
+    # accepted in memory (for config round-trips) but get stripped or
+    # masked on every externalization path.
+    _REDACTED_KEYS: ClassVar[tuple[tuple[str, ...], ...]] = (
         ("auth", "bootstrap_admin_key"),
-        # Backend credentials: inline values are accepted in memory (e.g.
-        # during a config round-trip) but never hit disk. Operators pin
-        # them via ``backend.auth.password_env`` / ``token_env``.
         ("backend", "auth", "password"),
         ("backend", "auth", "token"),
     )
 
+    # Sentinel used by the ``mask=True`` branch. Chosen for readability in
+    # admin UIs; never parsed back into AppConfig (the disk form uses
+    # ``mask=False`` which removes the key entirely).
+    MASK_SENTINEL: ClassVar[str] = "***"
+
     @classmethod
-    def _redact(cls, data: dict[str, object]) -> dict[str, object]:
+    def redact(cls, data: dict[str, object], *, mask: bool = True) -> dict[str, object]:
+        """Apply secret-redaction to a raw config dict.
+
+        Two modes share one secret-key registry:
+
+        - ``mask=True`` replaces non-empty secrets with :attr:`MASK_SENTINEL`.
+          Use for **live introspection** (``GET /admin/v1/config``): admins
+          see *which* secrets are configured without seeing their values.
+        - ``mask=False`` removes the keys entirely. Use for **persisted
+          outputs** (YAML on disk, exported config): secrets never touch
+          the filesystem even at rest.
+
+        Mutates ``data`` in place and returns it for chaining.
+        """
         for path in cls._REDACTED_KEYS:
             cursor: object = data
             for part in path[:-1]:
@@ -57,14 +75,22 @@ class ConfigManager:
                     cursor = None
                     break
                 cursor = cursor[part]
-            if isinstance(cursor, dict):
-                cursor.pop(path[-1], None)
+            if not isinstance(cursor, dict):
+                continue
+            leaf = path[-1]
+            if leaf not in cursor:
+                continue
+            if mask:
+                if cursor[leaf]:
+                    cursor[leaf] = cls.MASK_SENTINEL
+            else:
+                cursor.pop(leaf, None)
         return data
 
     def save(self, config: AppConfig) -> None:
         self._config = config
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        data = self._redact(config.model_dump(mode="python"))
+        data = self.redact(config.model_dump(mode="python"), mask=False)
         self.path.write_text(yaml.safe_dump(data, sort_keys=False))
         # The config file may contain sensitive values (backend URL with
         # embedded credentials, API-key pepper references, CORS allowlists

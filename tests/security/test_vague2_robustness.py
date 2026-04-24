@@ -208,7 +208,8 @@ def test_h4_search_emits_cache_control_and_etag(client) -> None:
     assert response.status_code == 200
     assert response.headers.get("Cache-Control", "").startswith("public, max-age=")
     etag = response.headers.get("ETag")
-    assert etag and etag.startswith('"search:')
+    # Weak ETag (RFC 7232): derived from the normalized query, not the body.
+    assert etag and etag.startswith('W/"search:')
 
 
 def test_h4_if_none_match_returns_304(client) -> None:
@@ -220,16 +221,28 @@ def test_h4_if_none_match_returns_304(client) -> None:
     assert not cached.content
 
 
+def test_h4_if_none_match_weak_comparison_accepts_stripped_prefix(client) -> None:
+    # RFC 7232 §2.3.2 weak comparison ignores the W/ prefix. Clients and
+    # intermediaries sometimes round-trip ETags without it; we still honor
+    # the 304 path.
+    response = client.get("/v1/search?q=abc")
+    etag = response.headers["ETag"]
+    assert etag.startswith("W/")
+    stripped = etag[2:]
+    cached = client.get("/v1/search?q=abc", headers={"If-None-Match": stripped})
+    assert cached.status_code == 304
+
+
 def test_h4_records_emit_etag(client) -> None:
     response = client.get("/v1/records/abc")
     assert response.status_code == 200
-    assert response.headers.get("ETag") == '"record:abc"'
+    assert response.headers.get("ETag") == 'W/"record:abc"'
 
 
 def test_h4_facets_emit_etag(client) -> None:
     response = client.get("/v1/facets?q=abc&facet=type")
     assert response.status_code == 200
-    assert response.headers.get("ETag", "").startswith('"facets:')
+    assert response.headers.get("ETag", "").startswith('W/"facets:')
 
 
 def test_h4_cache_disabled_omits_headers(client) -> None:
