@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import contextlib
 from pathlib import Path
+from typing import TypedDict
 from urllib.parse import parse_qs
 
 from fastapi import APIRouter, Request
@@ -65,21 +66,23 @@ def _setup_service() -> SetupDraftService:
     return SetupDraftService(container.store)
 
 
-def _require_login_key_id(request: Request) -> tuple[str, RedirectResponse | None]:
+def _require_login_key_id(request: Request) -> str | RedirectResponse:
     """Return the signed-in ``key_id`` or a login redirect.
 
     Split from ``_require_login`` because the wizard needs the key_id
     itself (drafts are per-admin) whereas the rest of the UI only
     cares whether somebody is signed in.
 
-    The first element is always a ``str`` (empty when the redirect is
-    set) so call sites that gate on ``redirect is None`` don't need a
-    secondary ``assert``-narrow for mypy.
+    The return type is a sum, not a tuple-with-sentinel: callers
+    discriminate with ``isinstance(result, RedirectResponse)`` and mypy
+    narrows the remaining branch to ``str`` automatically. This keeps
+    the type system honest — there is no "empty key_id" sentinel an
+    incautious caller can dereference.
     """
     key_id = get_ui_key_id(request)
     if key_id is None:
-        return "", RedirectResponse("/admin/login", status_code=303)
-    return key_id, None
+        return RedirectResponse("/admin/login", status_code=303)
+    return key_id
 
 
 async def _form(request: Request) -> dict[str, str]:
@@ -519,6 +522,24 @@ def usage_page(request: Request):
 # ---------------------------------------------------------------------------
 
 
+class _RunRow(TypedDict):
+    """One flattened row for the *Recent runs* table.
+
+    Declared as a ``TypedDict`` so the sort key on ``started_at`` returns
+    a real ``str`` (an ISO timestamp from the storage layer) rather than
+    an ``object`` that mypy refuses to compare. Stays a plain ``dict``
+    at runtime — Jinja iterates over it the same way as before.
+    """
+
+    source_label: str
+    started_at: str
+    ended_at: str | None
+    status: str
+    records_ingested: int
+    records_failed: int
+    error_message: str | None
+
+
 def _render_imports(
     request: Request,
     *,
@@ -529,7 +550,7 @@ def _render_imports(
     sources = container.store.list_import_sources()
     # Flatten the last 3 runs per source into one table so operators
     # can eyeball overall health without clicking into each source.
-    recent_runs: list[dict[str, object]] = []
+    recent_runs: list[_RunRow] = []
     label_by_id = {src.id: src.label for src in sources}
     for src in sources:
         for run in container.store.list_import_runs(src.id, limit=3):
@@ -544,7 +565,7 @@ def _render_imports(
                     "error_message": run.error_message,
                 }
             )
-    recent_runs.sort(key=lambda r: str(r["started_at"]), reverse=True)
+    recent_runs.sort(key=lambda r: r["started_at"], reverse=True)
     return _render(
         "imports.html",
         request,
@@ -768,9 +789,10 @@ def _render_wizard(
 @router.get("/ui/setup", response_class=HTMLResponse)
 def setup_landing(request: Request):
     """Wizard landing page: propose to start or resume a draft."""
-    key_id, redirect = _require_login_key_id(request)
-    if redirect is not None:
-        return redirect
+    _login = _require_login_key_id(request)
+    if isinstance(_login, RedirectResponse):
+        return _login
+    key_id = _login
     _, step = _setup_service().load(key_id)
     row = container.store.load_setup_draft(key_id)
     cfg = container.config_manager.config
@@ -787,9 +809,10 @@ def setup_landing(request: Request):
 @router.post("/ui/setup/start", response_class=HTMLResponse)
 async def setup_start(request: Request):
     """Create an empty draft and jump to the first step."""
-    key_id, redirect = _require_login_key_id(request)
-    if redirect is not None:
-        return redirect
+    _login = _require_login_key_id(request)
+    if isinstance(_login, RedirectResponse):
+        return _login
+    key_id = _login
     csrf_error = await _enforce_csrf(request)
     if csrf_error is not None:
         return csrf_error
@@ -849,9 +872,10 @@ async def setup_language(request: Request):
 @router.post("/ui/setup/reset", response_class=HTMLResponse)
 async def setup_reset(request: Request):
     """Discard the current draft and bounce back to the landing screen."""
-    key_id, redirect = _require_login_key_id(request)
-    if redirect is not None:
-        return redirect
+    _login = _require_login_key_id(request)
+    if isinstance(_login, RedirectResponse):
+        return _login
+    key_id = _login
     csrf_error = await _enforce_csrf(request)
     if csrf_error is not None:
         return csrf_error
@@ -898,9 +922,10 @@ def _draft_from_backend_form(data: dict[str, str], previous: SetupDraft) -> Setu
 
 @router.get("/ui/setup/backend", response_class=HTMLResponse)
 def setup_backend_page(request: Request):
-    key_id, redirect = _require_login_key_id(request)
-    if redirect is not None:
-        return redirect
+    _login = _require_login_key_id(request)
+    if isinstance(_login, RedirectResponse):
+        return _login
+    key_id = _login
     draft, _ = _setup_service().load(key_id)
     return _render_wizard(request, "setup/backend.html", draft=draft, current_step="backend")
 
@@ -914,9 +939,10 @@ async def setup_discover(request: Request):
     the conventional docker-compose hostnames. Reachable candidates
     come back with an "Use this URL" button that pre-fills the form.
     """
-    key_id, redirect = _require_login_key_id(request)
-    if redirect is not None:
-        return redirect
+    _login = _require_login_key_id(request)
+    if isinstance(_login, RedirectResponse):
+        return _login
+    key_id = _login
     csrf_error = await _enforce_csrf(request)
     if csrf_error is not None:
         return csrf_error
@@ -948,9 +974,10 @@ async def setup_discover_use(request: Request):
     they can jump straight to the "Test connection" / "Save & next"
     buttons with a sensible form pre-filled.
     """
-    key_id, redirect = _require_login_key_id(request)
-    if redirect is not None:
-        return redirect
+    _login = _require_login_key_id(request)
+    if isinstance(_login, RedirectResponse):
+        return _login
+    key_id = _login
     csrf_error = await _enforce_csrf(request)
     if csrf_error is not None:
         return csrf_error
@@ -971,9 +998,10 @@ async def setup_discover_use(request: Request):
 
 @router.post("/ui/setup/backend", response_class=HTMLResponse)
 async def setup_backend_submit(request: Request):
-    key_id, redirect = _require_login_key_id(request)
-    if redirect is not None:
-        return redirect
+    _login = _require_login_key_id(request)
+    if isinstance(_login, RedirectResponse):
+        return _login
+    key_id = _login
     csrf_error = await _enforce_csrf(request)
     if csrf_error is not None:
         return csrf_error
@@ -1056,9 +1084,10 @@ async def setup_backend_submit(request: Request):
 
 @router.get("/ui/setup/source", response_class=HTMLResponse)
 def setup_source_page(request: Request):
-    key_id, redirect = _require_login_key_id(request)
-    if redirect is not None:
-        return redirect
+    _login = _require_login_key_id(request)
+    if isinstance(_login, RedirectResponse):
+        return _login
+    key_id = _login
     draft, _ = _setup_service().load(key_id)
     if not draft.backend.get("url"):
         return RedirectResponse("/admin/ui/setup/backend", status_code=303)
@@ -1067,9 +1096,10 @@ def setup_source_page(request: Request):
 
 @router.post("/ui/setup/source", response_class=HTMLResponse)
 async def setup_source_submit(request: Request):
-    key_id, redirect = _require_login_key_id(request)
-    if redirect is not None:
-        return redirect
+    _login = _require_login_key_id(request)
+    if isinstance(_login, RedirectResponse):
+        return _login
+    key_id = _login
     csrf_error = await _enforce_csrf(request)
     if csrf_error is not None:
         return csrf_error
@@ -1147,9 +1177,10 @@ async def setup_source_submit(request: Request):
 
 @router.get("/ui/setup/mapping", response_class=HTMLResponse)
 def setup_mapping_page(request: Request):
-    key_id, redirect = _require_login_key_id(request)
-    if redirect is not None:
-        return redirect
+    _login = _require_login_key_id(request)
+    if isinstance(_login, RedirectResponse):
+        return _login
+    key_id = _login
     draft, _ = _setup_service().load(key_id)
     if not draft.source.get("index"):
         return RedirectResponse("/admin/ui/setup/source", status_code=303)
@@ -1195,9 +1226,10 @@ async def setup_mapping_profile(request: Request):
     empty mapping for ``custom`` (where the operator wants full
     manual control).
     """
-    key_id, redirect = _require_login_key_id(request)
-    if redirect is not None:
-        return redirect
+    _login = _require_login_key_id(request)
+    if isinstance(_login, RedirectResponse):
+        return _login
+    key_id = _login
     csrf_error = await _enforce_csrf(request)
     if csrf_error is not None:
         return csrf_error
@@ -1220,9 +1252,10 @@ async def setup_mapping_profile(request: Request):
 
 @router.post("/ui/setup/mapping", response_class=HTMLResponse)
 async def setup_mapping_submit(request: Request):
-    key_id, redirect = _require_login_key_id(request)
-    if redirect is not None:
-        return redirect
+    _login = _require_login_key_id(request)
+    if isinstance(_login, RedirectResponse):
+        return _login
+    key_id = _login
     csrf_error = await _enforce_csrf(request)
     if csrf_error is not None:
         return csrf_error
@@ -1283,9 +1316,10 @@ _ALLOWED_PUBLIC_MODES: frozenset[str] = frozenset(
 
 @router.get("/ui/setup/security", response_class=HTMLResponse)
 def setup_security_page(request: Request):
-    key_id, redirect = _require_login_key_id(request)
-    if redirect is not None:
-        return redirect
+    _login = _require_login_key_id(request)
+    if isinstance(_login, RedirectResponse):
+        return _login
+    key_id = _login
     draft, _ = _setup_service().load(key_id)
     if not draft.mapping:
         return RedirectResponse("/admin/ui/setup/mapping", status_code=303)
@@ -1294,9 +1328,10 @@ def setup_security_page(request: Request):
 
 @router.post("/ui/setup/security", response_class=HTMLResponse)
 async def setup_security_submit(request: Request):
-    key_id, redirect = _require_login_key_id(request)
-    if redirect is not None:
-        return redirect
+    _login = _require_login_key_id(request)
+    if isinstance(_login, RedirectResponse):
+        return _login
+    key_id = _login
     csrf_error = await _enforce_csrf(request)
     if csrf_error is not None:
         return csrf_error
@@ -1326,9 +1361,10 @@ async def setup_security_submit(request: Request):
 
 @router.get("/ui/setup/exposure", response_class=HTMLResponse)
 def setup_exposure_page(request: Request):
-    key_id, redirect = _require_login_key_id(request)
-    if redirect is not None:
-        return redirect
+    _login = _require_login_key_id(request)
+    if isinstance(_login, RedirectResponse):
+        return _login
+    key_id = _login
     draft, _ = _setup_service().load(key_id)
     if not draft.security_profile:
         return RedirectResponse("/admin/ui/setup/security", status_code=303)
@@ -1343,9 +1379,10 @@ def setup_exposure_page(request: Request):
 
 @router.post("/ui/setup/exposure", response_class=HTMLResponse)
 async def setup_exposure_submit(request: Request):
-    key_id, redirect = _require_login_key_id(request)
-    if redirect is not None:
-        return redirect
+    _login = _require_login_key_id(request)
+    if isinstance(_login, RedirectResponse):
+        return _login
+    key_id = _login
     csrf_error = await _enforce_csrf(request)
     if csrf_error is not None:
         return csrf_error
@@ -1380,9 +1417,10 @@ async def setup_exposure_submit(request: Request):
 
 @router.get("/ui/setup/keys", response_class=HTMLResponse)
 def setup_keys_page(request: Request):
-    key_id, redirect = _require_login_key_id(request)
-    if redirect is not None:
-        return redirect
+    _login = _require_login_key_id(request)
+    if isinstance(_login, RedirectResponse):
+        return _login
+    key_id = _login
     draft, _ = _setup_service().load(key_id)
     if not draft.security_profile:
         return RedirectResponse("/admin/ui/setup/security", status_code=303)
@@ -1391,9 +1429,10 @@ def setup_keys_page(request: Request):
 
 @router.post("/ui/setup/keys", response_class=HTMLResponse)
 async def setup_keys_submit(request: Request):
-    key_id, redirect = _require_login_key_id(request)
-    if redirect is not None:
-        return redirect
+    _login = _require_login_key_id(request)
+    if isinstance(_login, RedirectResponse):
+        return _login
+    key_id = _login
     csrf_error = await _enforce_csrf(request)
     if csrf_error is not None:
         return csrf_error
@@ -1447,9 +1486,10 @@ async def setup_keys_submit(request: Request):
 
 @router.get("/ui/setup/test", response_class=HTMLResponse)
 def setup_test_page(request: Request):
-    key_id, redirect = _require_login_key_id(request)
-    if redirect is not None:
-        return redirect
+    _login = _require_login_key_id(request)
+    if isinstance(_login, RedirectResponse):
+        return _login
+    key_id = _login
     draft, _ = _setup_service().load(key_id)
     if not draft.security_profile:
         return RedirectResponse("/admin/ui/setup/security", status_code=303)
@@ -1458,9 +1498,10 @@ def setup_test_page(request: Request):
 
 @router.post("/ui/setup/test", response_class=HTMLResponse)
 async def setup_test_submit(request: Request):
-    key_id, redirect = _require_login_key_id(request)
-    if redirect is not None:
-        return redirect
+    _login = _require_login_key_id(request)
+    if isinstance(_login, RedirectResponse):
+        return _login
+    key_id = _login
     csrf_error = await _enforce_csrf(request)
     if csrf_error is not None:
         return csrf_error
@@ -1516,9 +1557,10 @@ async def setup_test_submit(request: Request):
 
 @router.get("/ui/setup/done", response_class=HTMLResponse)
 def setup_done_page(request: Request):
-    key_id, redirect = _require_login_key_id(request)
-    if redirect is not None:
-        return redirect
+    _login = _require_login_key_id(request)
+    if isinstance(_login, RedirectResponse):
+        return _login
+    key_id = _login
     draft, _ = _setup_service().load(key_id)
     if not draft.security_profile:
         return RedirectResponse("/admin/ui/setup/security", status_code=303)
@@ -1527,9 +1569,10 @@ def setup_done_page(request: Request):
 
 @router.post("/ui/setup/publish", response_class=HTMLResponse)
 async def setup_publish(request: Request):
-    key_id, redirect = _require_login_key_id(request)
-    if redirect is not None:
-        return redirect
+    _login = _require_login_key_id(request)
+    if isinstance(_login, RedirectResponse):
+        return _login
+    key_id = _login
     csrf_error = await _enforce_csrf(request)
     if csrf_error is not None:
         return csrf_error
