@@ -1,4 +1,4 @@
-"""Minimal i18n (Sprint 29).
+"""Minimal i18n (Sprint 29 + Sprint 30).
 
 The target audience of EGG-API (Koha, PMB, AtoM, Mnesys, Ligeo
 deployments) includes a large francophone user base — we need the
@@ -11,8 +11,10 @@ This module ships a tiny in-memory catalogue with two languages
 1. ``?lang=`` query parameter (operator intent, always wins);
 2. ``egg_lang`` cookie (remembered preference);
 3. ``Accept-Language`` request header (browser defaults);
-4. ``EGG_DEFAULT_LANG`` environment variable (deployment preset);
-5. ``en`` as a last resort.
+4. ``AppConfig.default_language`` (Sprint 30: deployment-wide pick
+   chosen once by the admin in the setup wizard or config screen);
+5. ``EGG_DEFAULT_LANG`` environment variable (ops preset);
+6. ``en`` as a last resort.
 
 Strings are accessed by key via :func:`translator` which returns a
 callable the Jinja templates (or route handlers) can invoke as
@@ -133,6 +135,51 @@ EN: dict[str, str] = {
     "lang.en": "English",
     "lang.fr": "Français",
     "lang.switch_to": "Switch language",
+    # Admin shell (Sprint 30)
+    "admin.title": "EGG-API Admin",
+    "admin.signed_in_as": "Signed in as",
+    "admin.nav.dashboard": "Dashboard",
+    "admin.nav.setup": "Setup wizard",
+    "admin.nav.config": "Configuration",
+    "admin.nav.mapping": "Mapping",
+    "admin.nav.keys": "API keys",
+    "admin.nav.imports": "Data imports",
+    "admin.nav.usage": "Recent activity",
+    "admin.nav.help": "Help",
+    "admin.nav.sign_out": "Sign out",
+    "admin.nav.sign_out_everywhere": "Sign out everywhere",
+    "admin.nav.lang_switch": "Switch language",
+    # Imports dashboard (Sprint 30)
+    "imports.page.title": "Data imports",
+    "imports.page.help": (
+        "Connect your library, museum or archive catalogue to EGG-API "
+        "through an OAI-PMH endpoint or a flat file. The importer "
+        "harvests the records into the active search backend; your "
+        "public API then serves them."
+    ),
+    "imports.add.heading": "Add an import source",
+    "imports.add.label": "Label",
+    "imports.add.label_help": "A human-readable name. Shown in the dashboard and logs.",
+    "imports.add.kind": "Importer kind",
+    "imports.add.submit": "Add source",
+    "imports.add.schedule": "Run schedule",
+    "imports.add.schedule.manual": "Manual only (run via the button below)",
+    "imports.add.schedule.hourly": "Every hour",
+    "imports.add.schedule.6h": "Every 6 hours",
+    "imports.add.schedule.daily": "Once a day",
+    "imports.add.schedule.weekly": "Once a week",
+    "imports.table.label": "Label",
+    "imports.table.endpoint": "Endpoint",
+    "imports.table.prefix": "Prefix",
+    "imports.table.set": "Set",
+    "imports.table.profile": "Profile",
+    "imports.table.schedule": "Schedule",
+    "imports.table.last_run": "Last run",
+    "imports.table.next_run": "Next run",
+    "imports.table.actions": "Actions",
+    "imports.table.run_now": "Run now",
+    "imports.table.delete": "Delete",
+    "imports.table.empty": "No sources yet. Add one above.",
 }
 
 FR: dict[str, str] = {
@@ -224,6 +271,51 @@ FR: dict[str, str] = {
     "lang.en": "English",
     "lang.fr": "Français",
     "lang.switch_to": "Changer de langue",
+    # Admin shell (Sprint 30)
+    "admin.title": "Console EGG-API",
+    "admin.signed_in_as": "Connecté en tant que",
+    "admin.nav.dashboard": "Tableau de bord",
+    "admin.nav.setup": "Assistant de configuration",
+    "admin.nav.config": "Configuration",
+    "admin.nav.mapping": "Mapping",
+    "admin.nav.keys": "Clés d'API",
+    "admin.nav.imports": "Imports de données",
+    "admin.nav.usage": "Activité récente",
+    "admin.nav.help": "Aide",
+    "admin.nav.sign_out": "Se déconnecter",
+    "admin.nav.sign_out_everywhere": "Déconnecter toutes les sessions",
+    "admin.nav.lang_switch": "Changer de langue",
+    # Imports dashboard (Sprint 30)
+    "imports.page.title": "Imports de données",
+    "imports.page.help": (
+        "Connectez le catalogue de votre bibliothèque, musée ou service "
+        "d'archives à EGG-API via un endpoint OAI-PMH ou un fichier plat. "
+        "L'importeur moissonne les enregistrements vers le moteur de "
+        "recherche actif ; votre API publique les sert ensuite."
+    ),
+    "imports.add.heading": "Ajouter une source d'import",
+    "imports.add.label": "Libellé",
+    "imports.add.label_help": "Un nom lisible. Affiché dans le tableau de bord et les journaux.",
+    "imports.add.kind": "Type d'importeur",
+    "imports.add.submit": "Ajouter la source",
+    "imports.add.schedule": "Planification",
+    "imports.add.schedule.manual": "Manuel (lancer via le bouton ci-dessous)",
+    "imports.add.schedule.hourly": "Toutes les heures",
+    "imports.add.schedule.6h": "Toutes les 6 heures",
+    "imports.add.schedule.daily": "Une fois par jour",
+    "imports.add.schedule.weekly": "Une fois par semaine",
+    "imports.table.label": "Libellé",
+    "imports.table.endpoint": "Endpoint",
+    "imports.table.prefix": "Préfixe",
+    "imports.table.set": "Ensemble",
+    "imports.table.profile": "Profil",
+    "imports.table.schedule": "Planification",
+    "imports.table.last_run": "Dernier lancement",
+    "imports.table.next_run": "Prochain lancement",
+    "imports.table.actions": "Actions",
+    "imports.table.run_now": "Lancer maintenant",
+    "imports.table.delete": "Supprimer",
+    "imports.table.empty": "Aucune source pour l'instant. Ajoutez-en une ci-dessus.",
 }
 
 _CATALOGUES: dict[str, dict[str, str]] = {"en": EN, "fr": FR}
@@ -243,11 +335,29 @@ def _coerce_lang(raw: str | None) -> str | None:
     return None
 
 
+def _config_default_lang() -> str | None:
+    """Return ``AppConfig.default_language`` when set, else ``None``.
+
+    Imported lazily so :mod:`app.i18n` stays free of the container
+    dependency at import time (critical: ``container`` itself pulls
+    config, which pulls Pydantic models that haven't finished loading
+    when i18n is imported for the first time).
+    """
+
+    try:
+        from app.dependencies import container
+
+        raw = container.config_manager.config.default_language
+    except Exception:
+        return None
+    return _coerce_lang(raw)
+
+
 def resolve_lang(request: Request | None) -> str:
     """Pick the best supported language for a request.
 
     ``request`` may be ``None`` (unit-test context); the resolver then
-    falls through to the env default → English.
+    falls through to the config → env default → English.
     """
 
     if request is not None:
@@ -263,6 +373,9 @@ def resolve_lang(request: Request | None) -> str:
         coerced = _coerce_lang(header)
         if coerced:
             return coerced
+    cfg_lang = _config_default_lang()
+    if cfg_lang:
+        return cfg_lang
     env = (os.getenv("EGG_DEFAULT_LANG", "") or "").strip().lower()
     coerced = _coerce_lang(env)
     return coerced or DEFAULT_LANG

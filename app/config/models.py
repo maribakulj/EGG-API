@@ -216,6 +216,13 @@ class AppConfig(BaseModel):
     # optional sub-blocks of Record the mapper is allowed to populate.
     # "library" keeps the pre-S23 behaviour.
     schema_profile: SchemaProfile = "library"
+    # Sprint 30: deployment-wide default language for the admin UI and
+    # public landing page. Individual visitors can still override via
+    # the ``?lang=`` query, ``egg_lang`` cookie or ``Accept-Language``
+    # header; this field only kicks in when none of those express a
+    # preference. ``None`` → fall back to ``EGG_DEFAULT_LANG`` env →
+    # English (the historical behaviour).
+    default_language: Literal["en", "fr"] | None = None
     security_profile: str = "prudent"
     profiles: dict[str, SecurityProfile] = Field(
         default_factory=lambda: {

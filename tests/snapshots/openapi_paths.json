@@ -32,6 +32,7 @@
     "/admin/ui/setup/done",
     "/admin/ui/setup/exposure",
     "/admin/ui/setup/keys",
+    "/admin/ui/setup/language",
     "/admin/ui/setup/mapping",
     "/admin/ui/setup/mapping/profile",
     "/admin/ui/setup/publish",

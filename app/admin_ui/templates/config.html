@@ -26,6 +26,14 @@
   </label>
 
   <label>State DB path <input name="sqlite_path" value="{{ cfg.storage.sqlite_path }}" required /></label>
+
+  <label>Default interface language
+    <select name="default_language">
+      <option value="" {% if not cfg.default_language %}selected{% endif %}>Auto (browser / env default)</option>
+      <option value="en" {% if cfg.default_language == 'en' %}selected{% endif %}>English</option>
+      <option value="fr" {% if cfg.default_language == 'fr' %}selected{% endif %}>Français</option>
+    </select>
+  </label>
   <label>Allow empty query
     <select name="allow_empty_query">
       <option value="false" {% if not profile.allow_empty_query %}selected{% endif %}>No</option>

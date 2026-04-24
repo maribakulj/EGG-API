@@ -1,37 +1,45 @@
 <!doctype html>
-<html lang="en">
+<html lang="{{ lang|default('en') }}">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>EGG-API Admin</title>
+  <title>{{ t('admin.title') if t else 'EGG-API Admin' }}</title>
   <link rel="stylesheet" href="/admin-static/admin.css" />
 </head>
 <body>
   <header>
-    <h1>EGG-API Admin</h1>
+    <h1>{{ t('admin.title') if t else 'EGG-API Admin' }}</h1>
     {% if current_key_id %}
-    <p>Signed in as <strong>{{ current_key_id }}</strong></p>
+    <p>{{ t('admin.signed_in_as') if t else 'Signed in as' }} <strong>{{ current_key_id }}</strong></p>
     {% endif %}
   </header>
 
   {% if current_key_id %}
   <nav>
-    <a href="/admin/ui">Dashboard</a>
-    <a href="/admin/ui/setup">Setup wizard</a>
-    <a href="/admin/ui/config">Configuration</a>
-    <a href="/admin/ui/mapping">Mapping</a>
-    <a href="/admin/ui/keys">API keys</a>
-    <a href="/admin/ui/imports">Data imports</a>
-    <a href="/admin/ui/usage">Recent activity</a>
-    <a href="/admin/ui/help">Help</a>
+    <a href="/admin/ui">{{ t('admin.nav.dashboard') if t else 'Dashboard' }}</a>
+    <a href="/admin/ui/setup">{{ t('admin.nav.setup') if t else 'Setup wizard' }}</a>
+    <a href="/admin/ui/config">{{ t('admin.nav.config') if t else 'Configuration' }}</a>
+    <a href="/admin/ui/mapping">{{ t('admin.nav.mapping') if t else 'Mapping' }}</a>
+    <a href="/admin/ui/keys">{{ t('admin.nav.keys') if t else 'API keys' }}</a>
+    <a href="/admin/ui/imports">{{ t('admin.nav.imports') if t else 'Data imports' }}</a>
+    <a href="/admin/ui/usage">{{ t('admin.nav.usage') if t else 'Recent activity' }}</a>
+    <a href="/admin/ui/help">{{ t('admin.nav.help') if t else 'Help' }}</a>
     <form action="/admin/logout" method="post" class="inline-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-      <button type="submit">Sign out</button>
+      <button type="submit">{{ t('admin.nav.sign_out') if t else 'Sign out' }}</button>
     </form>
     <form action="/admin/logout-everywhere" method="post" class="inline-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-      <button type="submit" title="Revoke every active admin session">Sign out everywhere</button>
+      <button type="submit" title="{{ t('admin.nav.sign_out_everywhere') if t else 'Sign out everywhere' }}">{{ t('admin.nav.sign_out_everywhere') if t else 'Sign out everywhere' }}</button>
     </form>
+    <span class="lang-switch" aria-label="{{ t('admin.nav.lang_switch') if t else 'Switch language' }}" style="margin-left:auto">
+      {% set active_lang = lang|default('en') %}
+      {% if active_lang == 'en' %}
+        <strong>English</strong> · <a href="?lang=fr">Français</a>
+      {% else %}
+        <a href="?lang=en">English</a> · <strong>Français</strong>
+      {% endif %}
+    </span>
   </nav>
   {% endif %}
 

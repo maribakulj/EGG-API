@@ -96,10 +96,17 @@ def _render(
     status_code: int = 200,
     **context,
 ) -> HTMLResponse:
+    from app.i18n import resolve_lang, translator
+
     context.setdefault("current_key_id", get_ui_key_id(request))
     # Make the CSRF token available to every template so any form can include
     # it without each route explicitly passing it through the context.
     context.setdefault("csrf_token", get_csrf_for_request(request))
+    # Sprint 30: plumb the locale + translator into every template so
+    # nav labels, form headers and help text can flip between EN and FR.
+    lang = resolve_lang(request)
+    context.setdefault("lang", lang)
+    context.setdefault("t", translator(lang))
     return templates.TemplateResponse(request, template, context, status_code=status_code)
 
 
@@ -328,6 +335,13 @@ async def config_update(request: Request):
         # user-visible error.
         cfg.auth.public_mode = data.get("public_mode", "")  # type: ignore[assignment]
         cfg.storage.sqlite_path = data.get("sqlite_path", "").strip()
+        # Sprint 30: deployment-wide default language. Empty string clears
+        # the preference (resolver falls back to env → English).
+        default_language = (data.get("default_language") or "").strip().lower()
+        if default_language in ("en", "fr"):
+            cfg.default_language = default_language  # type: ignore[assignment]
+        elif default_language == "":
+            cfg.default_language = None
 
         if cfg.security_profile not in cfg.profiles:
             raise ValueError("Unknown security profile")
@@ -777,6 +791,55 @@ async def setup_start(request: Request):
         return csrf_error
     _setup_service().save(key_id, SetupDraft(), WIZARD_STEPS[0])
     return RedirectResponse("/admin/ui/setup/backend", status_code=303)
+
+
+@router.post("/ui/setup/language", response_class=HTMLResponse)
+async def setup_language(request: Request):
+    """Pick the deployment-wide UI language from the wizard landing screen.
+
+    Sprint 30: sets ``AppConfig.default_language`` (every visitor
+    without their own preference will see this language) and writes an
+    ``egg_lang`` cookie so the operator who made the pick carries it
+    through the rest of the wizard without re-selecting on every page.
+    """
+
+    guard = _require_login(request)
+    if guard is not None:
+        return guard
+    csrf_error = await _enforce_csrf(request)
+    if csrf_error is not None:
+        return csrf_error
+
+    from app.i18n import LANG_COOKIE, SUPPORTED_LANGS
+
+    data = await _form(request)
+    lang = (data.get("lang") or "").strip().lower()
+    if lang not in SUPPORTED_LANGS:
+        cfg = container.config_manager.config
+        row = container.store.load_setup_draft(get_ui_key_id(request) or "")
+        return _render(
+            "setup/landing.html",
+            request,
+            status_code=400,
+            draft_exists=row is not None,
+            current_step=None,
+            has_active_config=bool(cfg.backend.url),
+            cfg=cfg,
+            error="Unsupported language selection.",
+        )
+    cfg = container.config_manager.config.model_copy(deep=True)
+    cfg.default_language = lang  # type: ignore[assignment]
+    container.reload(AppConfig.model_validate(cfg.model_dump(mode="python")))
+
+    response = RedirectResponse("/admin/ui/setup", status_code=303)
+    response.set_cookie(
+        LANG_COOKIE,
+        lang,
+        max_age=365 * 24 * 3600,
+        httponly=True,
+        samesite="lax",
+    )
+    return response
 
 
 @router.post("/ui/setup/reset", response_class=HTMLResponse)

@@ -14,6 +14,16 @@ EGG-API is the middle layer that makes this possible. It sits between the public
 
 > EGG-API does not replace your source search engine, ILS, DAMS, or portal. It is a **normalizing, protective facade** that plugs on top of what you already run, and that can later serve as the base for an MCP connector (see SPECS §4).
 
+> **"But I don't have anything yet" (Sprint 30 note).** If your institution
+> does not already run an SIGB / DAMS / archive CMS, EGG-API is *not*
+> the right answer by itself — it is a publication layer, not a
+> content management system. The usual low-cost pairing is to install
+> [Omeka S](https://omeka.org/s/) (free, open-source, widely used for
+> small heritage collections) and point EGG at its built-in OAI-PMH
+> endpoint with the Sprint 22 `oaipmh` importer. Omeka handles the
+> CMS + storage side; EGG handles the public API + aggregator-facing
+> OAI-PMH + IIIF passthrough. No additional dev needed.
+
 ### Who it is for
 
 - **Small archives, libraries, museums, galleries** that host their own data but do not have IT or software-engineering staff on hand.

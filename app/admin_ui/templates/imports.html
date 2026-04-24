@@ -1,23 +1,19 @@
 {% extends "base.html" %}
 {% block content %}
-<h2>Data imports</h2>
-<p class="help">
-  Connect your library / museum / archive catalogue to EGG-API through an
-  OAI-PMH endpoint. The importer harvests the records into the active
-  search backend; your public API then serves them.
-</p>
+<h2>{{ t('imports.page.title') }}</h2>
+<p class="help">{{ t('imports.page.help') }}</p>
 
 {% if message %}<p class="success">{{ message }}</p>{% endif %}
 {% if error %}<p class="error">{{ error }}</p>{% endif %}
 
 <div class="panel">
-  <h3>Add an import source</h3>
+  <h3>{{ t('imports.add.heading') }}</h3>
   <form class="stack" method="post" action="/admin/ui/imports/add">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
     <label>
-      Label
+      {{ t('imports.add.label') }}
       <input name="label" required maxlength="128" placeholder="My catalogue" />
-      <p class="help">A human-readable name. Shown in the dashboard and logs.</p>
+      <p class="help">{{ t('imports.add.label_help') }}</p>
     </label>
     <label>
       Importer kind
@@ -88,13 +84,13 @@
       <p class="help">LIDO imports usually pair with the <em>museum</em> profile.</p>
     </label>
     <label>
-      Run schedule
+      {{ t('imports.add.schedule') }}
       <select name="schedule">
-        <option value="" selected>Manual only (run via the button below)</option>
-        <option value="hourly">Every hour</option>
-        <option value="6h">Every 6 hours</option>
-        <option value="daily">Once a day</option>
-        <option value="weekly">Once a week</option>
+        <option value="" selected>{{ t('imports.add.schedule.manual') }}</option>
+        <option value="hourly">{{ t('imports.add.schedule.hourly') }}</option>
+        <option value="6h">{{ t('imports.add.schedule.6h') }}</option>
+        <option value="daily">{{ t('imports.add.schedule.daily') }}</option>
+        <option value="weekly">{{ t('imports.add.schedule.weekly') }}</option>
       </select>
       <p class="help">
         When set, EGG-API automatically runs the importer at the

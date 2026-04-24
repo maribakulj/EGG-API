@@ -9,6 +9,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Sprint 30 — Deployment-wide language picker + polish** closes the
+  i18n story opened in Sprint 29 and trims the last rough edges before
+  release.
+  - New ``AppConfig.default_language`` field
+    (``Literal["en", "fr"] | None``) lets the admin choose a
+    deployment-wide default for the console + landing page. Visitor
+    preferences (query, cookie, ``Accept-Language``) keep precedence
+    over it; it only kicks in when the visitor expresses no
+    preference of their own.
+  - Wizard landing page (``/admin/ui/setup``) now renders a two-button
+    language picker (English / Français) right at the top. Submitting
+    to ``/admin/ui/setup/language`` writes ``config.default_language``
+    *and* sets the operator's ``egg_lang`` cookie so they carry the
+    pick through the rest of the wizard without re-selecting.
+  - ``/admin/ui/config`` gets a "Default interface language" dropdown
+    (Auto / English / Français). Empty selection clears the preference
+    and lets the resolver fall through to env / browser defaults.
+  - Admin shell (``base.html``) is now fully localised: title, sign-in
+    line, every nav link, both sign-out buttons, plus an
+    "English · Français" switcher in the nav bar. The imports page
+    heading, help copy, form heading + label, and the schedule dropdown
+    options all flip between English and French.
+  - The i18n resolver priority chain grows a fifth step:
+    query → cookie → ``Accept-Language`` → **``config.default_language``**
+    → ``EGG_DEFAULT_LANG`` → English.
+  - Coverage gate tightened back from 77 % to **78 %** now that the
+    importer + i18n surface has stabilised.
+  - README gains a dedicated "But I don't have anything yet" note
+    pointing operators without a SIGB / DAMS at
+    [Omeka S](https://omeka.org/s/) — a free open-source CMS that
+    exposes OAI-PMH out of the box and plugs into the Sprint 22
+    ``oaipmh`` importer with zero code.
+  - 17 new tests in ``tests/security/test_sprint30_i18n_config.py``
+    cover ``AppConfig.default_language`` validation (en / fr /
+    invalid), resolver priority at every step (config default wins
+    over env, cookie wins over config default, header wins over
+    config default, ``None`` defers to env), wizard language picker
+    rendering + POST persistence + cookie write + CSRF guard + 400
+    on unsupported value, admin config dropdown rendering + save
+    round-trip + empty-value clears the field, admin shell nav
+    renders in French via config default, imports page renders in
+    French, and the language-switch links round-trip EN ↔ FR in the
+    nav bar.
+
 - **Sprint 29 — French i18n + user-journey tests** makes the product
   approachable for the francophone half of the target market (Koha,
   PMB, AtoM, Mnesys, Ligeo deployments across France, Belgium, Quebec,
