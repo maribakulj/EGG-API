@@ -46,30 +46,31 @@ query parameter, an `egg_lang` cookie, or the browser's
 variable lets a francophone deployment (Koha / PMB / AtoM / Mnesys /
 Ligeo) boot directly in French.
 
-### Current delivery & desktop roadmap
+### Current delivery
 
-**Today**, EGG-API ships as a FastAPI service with a web-based admin UI at
-`/admin/*`. Bringing it up still requires a terminal, Python 3.10+, and one
-YAML edit (or a sequence of admin-API calls). In other words: the current
-release is aimed at an operator, not at an archivist working alone.
+EGG-API ships as a FastAPI service with a web-based admin UI at
+``/admin/*`` and a guided setup wizard. The three milestones that were
+roadmap in early sprints are now in the codebase:
 
-**The roadmap** toward the original product promise is explicit and tracked:
+1. **Admin UI setup wizard** — 7 screens (backend, source, mapping,
+   security, exposure, keys, live test) at ``/admin/ui/setup``. Stable.
+2. **Desktop package** (``.msi`` / ``.pkg`` / ``.AppImage``) via
+   Briefcase + ``pywebview`` — launches the FastAPI runtime in a native
+   window. **Experimental**: the release artefacts are unsigned, and the
+   packaging matrix is only exercised by the ``desktop-package.yml``
+   workflow on an opt-in push. A regular ``egg-api run`` / Docker
+   deployment remains the production path.
+3. **First-run UX** — ``egg-api start`` generates the admin key, opens
+   the wizard via a one-time token, and persists runtime data under the
+   OS-native user directory.
 
-1. A guided **Admin UI setup wizard** (SPECS §26, 7 screens) covering
-   backend connection, source selection, field mapping, security profile,
-   exposure, keys and a live test — so configuration stops requiring YAML.
-2. A **desktop package** (`.msi` / `.pkg` / `.AppImage`) built with
-   Briefcase + `pywebview`, launching the same FastAPI runtime in a native
-   window on localhost.
-3. A **first-run UX** (`egg-api start`) that generates the admin key,
-   opens the wizard in the default browser via a one-time token, and
-   persists runtime data under the OS-native user directory.
-
-Until those land, the honest description of EGG-API is: a hardened,
-well-tested façade for GLAM backends that still expects a Python-literate
-operator for the initial install. The rest of this README describes that
-reality. Progress toward the desktop story is tracked in
-[CHANGELOG.md](./CHANGELOG.md) and the SPECS.
+**Maturity honesty.** EGG-API is past prototype but not yet packaged as
+a shrink-wrapped appliance: the Python / Docker install path is
+solid, the OAI-PMH provider, OpenAPI public schema, cursor pagination,
+sort / date / include_fields query parameters, and secret redaction
+in admin endpoints all have regression tests. Tracking the real
+feature-by-feature state lives in [CHANGELOG.md](./CHANGELOG.md); read
+that before making purchasing or deployment decisions.
 
 ---
 
@@ -554,7 +555,8 @@ make test                  # run the full test suite (pytest)
 pytest tests/security/     # run just the security regression suites
 ```
 
-The suite ships **134 tests**, organized as follows:
+The suite ships **~680 tests** (count grows with each sprint; run
+``pytest`` locally for the current figure), organized as follows:
 
 ```
 tests/
@@ -608,7 +610,7 @@ EGG-API/
 │   └── runtime_paths.py             # path resolution + bootstrap-key precedence
 ├── examples/config.yaml             # annotated reference config
 ├── scripts/setup.sh                 # venv + editable install
-├── tests/                           # 134 tests (see above)
+├── tests/                           # security + integration + unit (see above)
 ├── CHANGELOG.md
 ├── INSTALL.md
 ├── LICENSE

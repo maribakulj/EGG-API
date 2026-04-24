@@ -1,9 +1,19 @@
 """HTTP caching helpers for public GET endpoints.
 
-Implements ``Cache-Control`` and strong ``ETag`` validation with
+Implements ``Cache-Control`` and **weak** ``ETag`` validation with
 ``If-None-Match`` returning ``304 Not Modified``. The TTL is driven by
 ``CacheConfig.public_max_age_seconds``; when ``CacheConfig.enabled`` is
 ``False`` the helper is a no-op.
+
+The ETags are weak (``W/"…"`` per RFC 7232) because they're derived from
+the *request shape* (normalized query key, record id) rather than a hash
+of the response body. That gives semantic equivalence across equivalent
+requests without committing to byte-level identity — which would require
+hashing the rendered body and defeat the fast-path win of 304 responses
+for unchanged queries. If the backend index changes between two calls
+with the same query, the ETag stays the same within a single cache TTL
+window; operators who need stricter freshness should lower
+``CacheConfig.public_max_age_seconds`` or disable caching entirely.
 
 The ``Cache-Control`` directive follows the auth mode:
 
@@ -23,9 +33,22 @@ from fastapi import Request, Response
 from app.dependencies import container
 
 
+def _strip_weak_prefix(tag: str) -> str:
+    """Strip the ``W/`` prefix for weak ETag comparison (RFC 7232 §2.3.2)."""
+    return tag[2:] if tag.startswith("W/") else tag
+
+
 def _etag_matches(header_value: str, etag: str) -> bool:
+    """Weak-comparison match against an ``If-None-Match`` header value.
+
+    Per RFC 7232 §3.2 the weak comparison ignores the ``W/`` prefix, so
+    ``W/"x"`` and ``"x"`` are equivalent. We normalize both sides before
+    comparing; this also tolerates intermediaries that strip or add the
+    prefix.
+    """
+    target = _strip_weak_prefix(etag)
     candidates = [c.strip() for c in header_value.split(",") if c.strip()]
-    return any(c == etag or c == "*" for c in candidates)
+    return any(c == "*" or _strip_weak_prefix(c) == target for c in candidates)
 
 
 def _cache_control_directive(max_age: int) -> str:

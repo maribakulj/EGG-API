@@ -6,7 +6,7 @@ import json
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, Request, Response
-from fastapi.responses import PlainTextResponse, RedirectResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse
 
 from app.auth.dependencies import enforce_public_auth, require_admin_key
 from app.dependencies import container
@@ -103,6 +103,11 @@ def search(
     ``format=csv`` switches the response to ``text/csv`` with a fixed,
     spreadsheet-friendly column set (no facet payload). The query-policy
     engine accepts and validates the parameter.
+
+    ``include_fields`` (sparse fieldsets, JSON only) keeps each result
+    limited to the requested fields plus the structural ``id`` / ``type``
+    keys. CSV exports use their own fixed column set; JSON-LD keeps the
+    full shape so the ``@context`` mapping stays consistent.
     """
     fmt = (request.query_params.get("format") or "json").lower()
     # Accept-header negotiation overrides only when ``format`` was left at
@@ -118,7 +123,7 @@ def search(
         )
 
     nq = container.policy.parse(request)
-    etag = f'"search:{fmt}:{container.policy.compute_cache_key(nq)}"'
+    etag = f'W/"search:{fmt}:{container.policy.compute_cache_key(nq)}"'
     cached = apply_cache_headers(request, response, etag)
     if cached is not None:
         return cached
@@ -172,6 +177,25 @@ def search(
             if header in response.headers:
                 jsonld_response.headers[header] = response.headers[header]
         return jsonld_response
+    if nq.include_fields:
+        # Sparse-fieldset mode: bypass SearchResponse so FastAPI's
+        # response_model doesn't backfill the pruned Record defaults.
+        # ``id`` + ``type`` are structural and always kept.
+        allowed_keys = set(nq.include_fields) | {"id", "type"}
+        pruned_results = [r.model_dump(include=allowed_keys, mode="json") for r in results]
+        envelope = {
+            "total": total_value,
+            "page": nq.page,
+            "page_size": nq.page_size,
+            "results": pruned_results,
+            "facets": facets,
+            "next_cursor": next_cursor,
+        }
+        sparse_response = JSONResponse(content=envelope)
+        for header in ("Cache-Control", "ETag"):
+            if header in response.headers:
+                sparse_response.headers[header] = response.headers[header]
+        return sparse_response
     return SearchResponse(
         total=total_value,
         page=nq.page,
@@ -196,7 +220,7 @@ def get_record(
     JSON shape documented in the :class:`~app.schemas.record.Record`
     component.
     """
-    etag = f'"record:{record_id}"'
+    etag = f'W/"record:{record_id}"'
     cached = apply_cache_headers(request, response, etag)
     if cached is not None:
         return cached
@@ -228,7 +252,7 @@ def facets(
 ):
     """Return facet counts only (no hits), useful for sidebar UIs."""
     nq = container.policy.parse(request)
-    etag = f'"facets:{container.policy.compute_cache_key(nq)}"'
+    etag = f'W/"facets:{container.policy.compute_cache_key(nq)}"'
     cached = apply_cache_headers(request, response, etag)
     if cached is not None:
         return cached

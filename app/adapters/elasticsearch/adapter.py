@@ -325,6 +325,33 @@ class ElasticsearchAdapter:
     def validate_mapping(self) -> dict[str, Any]:
         return {"status": "ok"}
 
+    @staticmethod
+    def _parse_sort(sort_name: str | None) -> list[dict[str, str]]:
+        """Translate a symbolic sort name into an ES sort clause.
+
+        Accepts the ``<field>_asc`` / ``<field>_desc`` convention used in
+        ``config.allowed_sorts`` (e.g. ``date_desc``, ``title_asc``), plus
+        the reserved ``relevance`` alias → ``_score desc``. ``None`` falls
+        back to relevance so anonymous text queries keep their current
+        ranking behavior.
+
+        An ``_id asc`` tie-breaker is ALWAYS appended: ``search_after``
+        cursor pagination needs a deterministic trailing key, so the very
+        first page already carries a usable ``hit.sort`` tail for the
+        next call — callers don't have to opt in.
+        """
+        primary: list[dict[str, str]]
+        if not sort_name or sort_name == "relevance":
+            primary = [{"_score": "desc"}]
+        elif sort_name.endswith("_desc"):
+            primary = [{sort_name[:-5]: "desc"}]
+        elif sort_name.endswith("_asc"):
+            primary = [{sort_name[:-4]: "asc"}]
+        else:
+            # Allowlist-validated opaque name — treat as a bare field, asc.
+            primary = [{sort_name: "asc"}]
+        return [*primary, {"_id": "asc"}]
+
     def translate_query(
         self,
         query: NormalizedQuery,
@@ -346,18 +373,30 @@ class ElasticsearchAdapter:
             filter_clauses.append({"term": {"has_digital": query.has_digital}})
         if query.has_iiif is not None:
             filter_clauses.append({"term": {"has_iiif": query.has_iiif}})
+        # Date range on the canonical ``date`` public field. Operators whose
+        # backend uses a different physical name declare an ES field alias
+        # at the index level; the adapter stays schema-agnostic.
+        if query.date_from or query.date_to:
+            range_bounds: dict[str, Any] = {}
+            if query.date_from:
+                range_bounds["gte"] = query.date_from
+            if query.date_to:
+                range_bounds["lte"] = query.date_to
+            filter_clauses.append({"range": {"date": range_bounds}})
 
         size = size_override if size_override is not None else query.page_size
         bucket_size = max(1, int(bucket_size_default))
         body: dict[str, Any] = {
             "size": size,
             "query": {"bool": {"must": must or [{"match_all": {}}], "filter": filter_clauses}},
+            # Sort is emitted unconditionally: it's the precondition for
+            # cursor bootstrap (first hit.sort tail → next_cursor token).
+            "sort": self._parse_sort(query.sort),
         }
         if query.cursor:
-            # search_after mode: stable over very deep scroll, tie-broken by
-            # _id so the order is total. ``from`` is forbidden in this mode.
+            # search_after mode: stable over very deep scroll; ``from``
+            # is forbidden in this mode.
             body["search_after"] = _decode_cursor(query.cursor)
-            body["sort"] = [{"_id": "asc"}]
         else:
             body["from"] = (query.page - 1) * query.page_size
         if include_aggs and query.facets:

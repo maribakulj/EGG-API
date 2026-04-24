@@ -78,11 +78,15 @@ def test_s8_1_cursor_bypasses_max_depth(client) -> None:
 
 def test_s8_1_translate_query_emits_search_after_with_cursor() -> None:
     adapter = ElasticsearchAdapter("http://es.local", "records")
-    cursor = _encode_cursor(["abc"])
+    # Two-element cursor: the sort is [primary, _id], so a real ``search_after``
+    # token carries both values. A caller that round-trips ``next_cursor`` from
+    # the previous page gets this shape automatically.
+    cursor = _encode_cursor([1.0, "abc"])
     body = adapter.translate_query(NormalizedQuery(q="x", cursor=cursor))
     assert "from" not in body
-    assert body["search_after"] == ["abc"]
-    assert body["sort"] == [{"_id": "asc"}]
+    assert body["search_after"] == [1.0, "abc"]
+    # Default sort is relevance + _id tie-breaker (stable across shards).
+    assert body["sort"] == [{"_score": "desc"}, {"_id": "asc"}]
 
 
 def test_s8_1_translate_query_uses_from_size_without_cursor() -> None:

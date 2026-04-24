@@ -198,7 +198,12 @@ def test_g6_openapi_path_snapshot_file_exists() -> None:
     assert snapshot.exists()
     data = json.loads(snapshot.read_text())
     assert "paths" in data
-    assert len(data["paths"]) >= 30
+    # The snapshot covers the public /v1/openapi.json surface (admin paths
+    # moved to the auth-gated /admin/v1/openapi.json). 10 is a conservative
+    # floor: removing any of the core public endpoints is a breaking change
+    # that should fail the dedicated snapshot drift test with a proper
+    # message, not this smoke check.
+    assert len(data["paths"]) >= 10
 
 
 # ---------------------------------------------------------------------------

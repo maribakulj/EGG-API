@@ -432,4 +432,24 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
 
 @app.get("/v1/openapi.json")
 def openapi_json() -> dict[str, object]:
-    return app.openapi()
+    """Return the OpenAPI schema restricted to public surfaces.
+
+    ``/admin/*`` paths are stripped so anonymous callers cannot fingerprint
+    the operator surface from the schema (the same reason ``/docs`` is
+    hidden in production). Operators who need the full schema can hit
+    ``/admin/v1/openapi.json`` with their admin key.
+
+    Component schemas are intentionally *not* pruned: most (Record,
+    SearchResponse, error envelopes) are shared across public and admin
+    paths, and orphan schemas are cosmetic — they expose shape, not
+    routes.
+    """
+    schema = app.openapi()
+    public_paths = {
+        path: ops for path, ops in schema.get("paths", {}).items() if not path.startswith("/admin/")
+    }
+    filtered = dict(schema)
+    filtered["paths"] = public_paths
+    if "tags" in filtered:
+        filtered["tags"] = [t for t in filtered["tags"] if t.get("name") != "admin"]
+    return filtered

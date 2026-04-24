@@ -226,8 +226,18 @@ def test_m7_public_endpoints_have_openapi_descriptions(client) -> None:
         )
 
 
-def test_m7_admin_endpoints_have_openapi_descriptions(client) -> None:
-    schema = client.get("/v1/openapi.json").json()
+def test_m7_admin_endpoints_have_openapi_descriptions(client, admin_headers) -> None:
+    # Admin paths are exposed only on the authenticated ``/admin/v1/openapi.json``;
+    # the public ``/v1/openapi.json`` strips them so anonymous callers cannot
+    # fingerprint the operator surface.
+    schema = client.get("/admin/v1/openapi.json", headers=admin_headers).json()
     paths = schema["paths"]
     admin_get = paths["/admin/v1/config"].get("get", {})
     assert admin_get.get("description") or admin_get.get("summary")
+
+
+def test_m7_public_openapi_strips_admin_paths(client) -> None:
+    # Security contract: the public schema never carries /admin/* routes.
+    schema = client.get("/v1/openapi.json").json()
+    admin_paths = [p for p in schema["paths"] if p.startswith("/admin/")]
+    assert admin_paths == [], f"public OpenAPI leaked admin paths: {admin_paths}"

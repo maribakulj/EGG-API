@@ -23,6 +23,9 @@ scripts
 .pre-commit-config.yaml
 Makefile
 *.md
+# README.md is declared as ``readme`` in pyproject.toml — setuptools
+# needs it during ``python -m build``, so keep it in the build context.
+!README.md
 docker-compose*.yml
 Dockerfile
 .dockerignore
