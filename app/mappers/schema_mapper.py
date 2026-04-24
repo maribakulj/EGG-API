@@ -98,7 +98,7 @@ def _apply_template(rule: dict[str, Any], doc: dict[str, Any]) -> Any:
     # ``"$title $leaked"`` with only ``title`` allowed renders
     # ``"A "`` instead of leaking the literal ``$leaked`` back to
     # the caller.
-    def _drop_if_not_allowed(match) -> str:  # type: ignore[no-untyped-def]
+    def _drop_if_not_allowed(match) -> str:
         name = match.group(1)
         return match.group(0) if name in allow else ""
 

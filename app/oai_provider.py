@@ -399,9 +399,9 @@ def _verb_list(
 
     resumption_xml = ""
     if next_cursor:
-        token = _Token(cursor=next_cursor, metadata_prefix=metadata_prefix).encode()
+        token_str = _Token(cursor=next_cursor, metadata_prefix=metadata_prefix).encode()
         resumption_xml = (
-            f'<resumptionToken completeListSize="{total}">{_esc(token)}</resumptionToken>'
+            f'<resumptionToken completeListSize="{total}">{_esc(token_str)}</resumptionToken>'
         )
     body = wrapper_open + listing + resumption_xml + wrapper_close
     return _envelope(request_url=request_url, verb=verb, params=params, body=body)

@@ -89,8 +89,8 @@ def setup_file_logging(home: Path) -> Path:
     stream = open(  # noqa: SIM115
         log_path, "a", buffering=1, encoding="utf-8", errors="replace"
     )
-    sys.stdout = stream  # type: ignore[assignment]
-    sys.stderr = stream  # type: ignore[assignment]
+    sys.stdout = stream
+    sys.stderr = stream
 
     # Rebind Python logging to the same stream so uvicorn logs + our
     # ``logger.info()`` calls all land in the single file.
@@ -250,7 +250,7 @@ def launch(*, host: str = "127.0.0.1", port: int | None = None) -> int:
     _wait_for_port(host, selected_port, timeout=5.0)
 
     try:
-        import webview  # type: ignore[import-not-found]
+        import webview
     except ImportError:
         logger.warning("pywebview_unavailable; falling back to native dialog")
         # Surface the URL through whatever the OS can show natively;

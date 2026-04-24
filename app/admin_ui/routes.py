@@ -65,16 +65,20 @@ def _setup_service() -> SetupDraftService:
     return SetupDraftService(container.store)
 
 
-def _require_login_key_id(request: Request) -> tuple[str, None] | tuple[None, RedirectResponse]:
+def _require_login_key_id(request: Request) -> tuple[str, RedirectResponse | None]:
     """Return the signed-in ``key_id`` or a login redirect.
 
     Split from ``_require_login`` because the wizard needs the key_id
     itself (drafts are per-admin) whereas the rest of the UI only
     cares whether somebody is signed in.
+
+    The first element is always a ``str`` (empty when the redirect is
+    set) so call sites that gate on ``redirect is None`` don't need a
+    secondary ``assert``-narrow for mypy.
     """
     key_id = get_ui_key_id(request)
     if key_id is None:
-        return None, RedirectResponse("/admin/login", status_code=303)
+        return "", RedirectResponse("/admin/login", status_code=303)
     return key_id, None
 
 
@@ -540,7 +544,7 @@ def _render_imports(
                     "error_message": run.error_message,
                 }
             )
-    recent_runs.sort(key=lambda r: r["started_at"], reverse=True)
+    recent_runs.sort(key=lambda r: str(r["started_at"]), reverse=True)
     return _render(
         "imports.html",
         request,
